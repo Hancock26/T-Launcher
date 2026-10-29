@@ -18,10 +18,10 @@ Pantalla de inicio estilo Tesla para radios Android de carro (Android 8 a 14), h
 - **Navegación dentro de la pantalla:** busca direcciones colombianas ("Calle 72 # 46-30") o lugares, traza la ruta, muestra la tarjeta de giro y la hora de llegada, y da indicaciones por voz. Si usas Waze o Google Maps, también muestra sus indicaciones.
 - **Vista de conducción tipo Tesla:** tu carro sobre la forma real de las calles del mapa, con la ruta azul, flechas de dirección, semáforos y señales de PARE.
 - **Aviso de cámaras de fotomultas** registradas en OpenStreetMap.
-- **Pico y placa y restricciones por placa** automáticas por GPS: Colombia (Bogotá, Medellín, Cali, Bucaramanga, Cartagena, Manizales), México (Hoy No Circula), Santiago de Chile y Quito, o modo manual.
+- **Pico y placa y restricciones por placa** automáticas por GPS: Colombia (Bogotá, Medellín, Cali, Bucaramanga, Cartagena, Manizales), México (Hoy No Circula), Santiago de Chile y Quito, o cualquier país del continente Americano.
 - **Velocidad por GPS:** naranja por encima de 80 km/h y roja por encima de 100. Muestra el límite de la vía.
 - **Música:** carátula, canción y controles de Spotify, YouTube Music y otras.
-- **Tema de noche** con la puesta del sol (en Colombia desde las 6:01 p. m.) o al encender las luces (si el radio lo permite), clima, kilometraje y recordatorio de aceite.
+- **Tema de noche** con la puesta del sol (en Colombia desde las 6:01 p. m. o en otros paises segun la ubicación GPS realizada el cambio apropoiado) o al encender las luces (si el radio lo permite), clima, kilometraje y recordatorio de aceite.
 
 **Simulado (solo visual):** los cambios P-R-N-D (se deducen de la velocidad), los botones de seguro, capó y baúl, la temperatura de la barra y los carros alrededor. **No es un piloto automático:** no frena ni maneja.
 

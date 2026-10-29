@@ -171,8 +171,13 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :root[data-theme="dark"] #map { background: #1a1a1a; }
 :root[data-theme="dark"] #map .maplibregl-canvas { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.92) saturate(.5); }
 .maplibregl-ctrl-attrib { font-size: 9px; }
-:root[data-theme="dark"] #map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(.9) saturate(.4); }
-:root:not([data-theme="dark"]) #map .leaflet-tile-pane { filter: saturate(.25) brightness(1.04); }
+/* Leaflet heading-up: the map layer is bigger than the panel so the corners stay covered when it turns and tilts */
+.mapwrap { overflow: hidden; }
+#map.hup { inset: -115% -70%; transform-origin: 50% 50%; transition: transform .9s linear; will-change: transform; }
+#map.hup .leaflet-marker-icon { transition: none; }
+#arrow { transition: transform .9s linear; }
+:root[data-theme="dark"] #map .leaflet-tile-pane { filter: brightness(1.15) contrast(1.05); }
+.mapattr { position: absolute; right: 6px; bottom: 4px; z-index: 450; font-size: 9px; color: #757575; background: rgba(250,250,250,.75); padding: 0 4px; border-radius: 3px; pointer-events: none; }
 .leaflet-container { font-family: var(--font); }
 .leaflet-control-attribution { font-size: 9px; background: rgba(250,250,250,.8) !important; color: #757575 !important; }
 .leaflet-control-attribution a { color: #757575 !important; }
@@ -444,6 +449,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
           <button type="button" id="overview" aria-label="Ver toda la ruta"><svg viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg></button>
           <button type="button" id="toHome" aria-label="Agrandar o reducir el mapa"><svg viewBox="0 0 24 24"><path id="expPath" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
         </div>
+        <div class="mapattr" id="mapAttr" hidden>© OpenStreetMap · © CARTO</div>
         <div class="card mapmsg" id="mapMsg" hidden>El mapa no carga. Revisa la conexión a internet.</div>
         <div class="applaunch" id="appLaunch" hidden>
           <button class="go" id="appGo" type="button"><svg viewBox="0 0 24 24"><path d="M12 2 4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg><span id="appGoText">Abrir mapas</span></button>
@@ -630,6 +636,7 @@ function refreshCarMark() {
 function styleUrl(n) { return 'https://tiles.openfreemap.org/styles/' + (n ? 'positron' : 'liberty'); }
 var mlStyleNight = null;
 function setMapTheme(n) {
+  if (map && tiles && !sat) { var u = baseTiles(); if (tiles._url !== u) tiles.setUrl(u); }
   if (!ml || !mlReady || mlStyleNight === n) return;
   mlStyleNight = n; ml.setStyle(styleUrl(n));
 }
@@ -655,20 +662,41 @@ function leafletMap() {
   if (ml) { try { ml.remove(); } catch (e) {} ml = null; mlReady = false; }
   if (map || !window.L) { if (!window.L) $('mapMsg').hidden = false; return; }
   $('map').innerHTML = '';
-  map = L.map('map', { zoomControl: false, attributionControl: true }).setView([4.6097, -74.0817], 15);
-  map.attributionControl.setPrefix(false);
-  map.on('dragstart', function () { follow = false; dragAt = Date.now(); $('recenter').classList.remove('follow'); });
+  map = L.map('map', { zoomControl: false, attributionControl: false, zoomSnap: 0.25, fadeAnimation: false }).setView([4.6097, -74.0817], 15);
+  $('mapAttr').hidden = false;
+  map.on('dragstart', function () { follow = false; dragAt = Date.now(); $('recenter').classList.remove('follow'); headUp(false); });
   if (nav.route) setTimeout(drawRoute, 0);
   if (sat) setTimeout(applySat, 0);
   marker = L.marker([4.6097, -74.0817], { icon: L.divIcon({ className: '', html: '<div id="arrow">' + carMarkHtml() + '</div>', iconSize: [44, 48], iconAnchor: [22, 24] }), interactive: false });
-  var base = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_';
   var loaded = 0;
-  tiles = L.tileLayer(base + 'Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, maxNativeZoom: 16, attribution: 'Tiles © Esri' });
+  // CARTO "Voyager" by day (clean, coloured roads, like Waze / Google) and "Dark Matter" by night.
+  tiles = L.tileLayer(baseTiles(), { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', keepBuffer: 4 });
   tiles.on('tileload', function () { loaded++; $('mapMsg').hidden = true; });
   tiles.on('tileerror', function () { if (!loaded) $('mapMsg').hidden = false; });
   tiles.addTo(map);
-  L.tileLayer(base + 'Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, maxNativeZoom: 16 }).addTo(map);
 }
+var SAT_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+function baseTiles() {
+  if (sat) return SAT_TILES;
+  return 'https://{s}.basemaps.cartocdn.com/rastertiles/' + (document.documentElement.dataset.theme === 'dark' ? 'dark_all' : 'voyager') + '/{z}/{x}/{y}.png';
+}
+// Heading-up for the Leaflet map (it can't rotate by itself): the whole map layer is turned and tilted with CSS,
+// so the way you drive always points up and the road ahead is seen in perspective, like in MapLibre / Tesla.
+var hup = { on: false, rot: 0 };
+function headUp(on, bearing) {
+  var el = $('map');
+  if (!on) {
+    if (hup.on) { hup.on = false; el.classList.remove('hup'); el.style.transform = ''; map && map.invalidateSize(false); }
+    var a0 = document.getElementById('arrow'); if (a0) a0.style.transform = 'rotate(' + (lastHeading || 0) + 'deg)';
+    return;
+  }
+  if (!hup.on) { hup.on = true; hup.rot = bearing; el.classList.add('hup'); map.invalidateSize(false); }
+  hup.rot += angDiff(bearing, hup.rot); // shortest way round, no full spins at 0° / 360°
+  var h = $('mapwrapEl').clientHeight || 600;
+  el.style.transform = 'translateY(' + Math.round(h * 0.2) + 'px) perspective(' + Math.round(h * 1.4) + 'px) rotateX(38deg) rotate(' + (-hup.rot) + 'deg)';
+  var a = document.getElementById('arrow'); if (a) a.style.transform = 'rotate(' + bearing + 'deg)'; // inside the turned layer
+}
+var lastHeading = 0;
 function camPadding() {
   var h = $('map').clientHeight || 600;
   return { top: Math.round(h * 0.38), bottom: 0, left: 0, right: 0 };
@@ -677,15 +705,16 @@ var dragAt = 0;
 function updateMap(s) {
   if (!s.fix) return;
   var sp = Math.max(0, s.speed || 0), moving = sp >= 8 || !!nav.route;
+  var hd = pose.ok ? pose.fh : (s.bearing || 0); lastHeading = hd;
   // While driving, the map goes back to following the car 12 s after the user moved it.
   if (!follow && sp >= 8 && dragAt && Date.now() - dragAt > 12000) { follow = true; $('recenter').classList.add('follow'); }
   if (ml && mlReady) {
     var ll = [s.lon, s.lat];
     if (!lastPos) { mlMarker.addTo(ml); ml.jumpTo({ center: ll, zoom: 16 }); }
-    mlMarker.setLngLat(ll).setRotation(s.bearing || 0);
+    mlMarker.setLngLat(ll).setRotation(hd);
     if (follow) {
       // Tesla "heading up": the map turns with the car and tilts in 3D; the car sits in the lower part of the map.
-      if (moving) ml.easeTo({ center: ll, bearing: sp >= 3 ? (s.bearing || 0) : ml.getBearing(), pitch: 50, zoom: sp > 70 ? 15.6 : 16.6,
+      if (moving) ml.easeTo({ center: ll, bearing: sp >= 3 ? hd : ml.getBearing(), pitch: 50, zoom: sp > 70 ? 15.6 : 16.6,
         padding: camPadding(), duration: 950 });
       else ml.easeTo({ center: ll, pitch: 0, zoom: Math.max(ml.getZoom(), 15.5), padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 950 });
     }
@@ -694,8 +723,14 @@ function updateMap(s) {
     var p = [s.lat, s.lon];
     if (!lastPos) { marker.addTo(map); map.setView(p, 16, { animate: false }); }
     marker.setLatLng(p);
-    var a = document.getElementById('arrow'); if (a) a.style.transform = 'rotate(' + (s.bearing || 0) + 'deg)';
-    if (follow) map.panTo(p, { animate: true, duration: 0.8 });
+    if (follow && moving && !sat) {
+      headUp(true, hd);
+      var z = sp > 70 ? 16 : 17;
+      if (Math.abs(map.getZoom() - z) > 0.1) map.setView(p, z, { animate: false }); else map.panTo(p, { animate: true, duration: 0.9, easeLinearity: 1 });
+    } else {
+      headUp(false);
+      if (follow) map.panTo(p, { animate: true, duration: 0.8 });
+    }
     lastPos = p;
   }
 }
@@ -901,7 +936,7 @@ function toLocal(lon, lat) { return [(lon - world.lon0) * world.kx, (lat - world
 function setOrigin(lat, lon) {
   if (typeof pois !== 'undefined') { pois.list = []; pois.e = pois.n = 1e9; pois.at = 0; }
   world.lat0 = lat; world.lon0 = lon; world.kx = 111320 * Math.cos(lat * Math.PI / 180);
-  world.roads = []; world.route = null; world.routeKey = null; pose.ok = false;
+  world.roads = []; world.route = null; world.routeKey = null; pose.ok = false; pose.pe = null;
 }
 function vectorSource() {
   try { var ss = ml.getStyle().sources; for (var k in ss) if (ss[k].type === 'vector') return k; } catch (e) {}
@@ -1007,7 +1042,16 @@ function poseFix(s, sp) {
   if (!world.lat0 || Math.abs(s.lat - world.lat0) > 0.02 || Math.abs(s.lon - world.lon0) > 0.02) setOrigin(s.lat, s.lon);
   var q = toLocal(s.lon, s.lat);
   pose.fe = q[0]; pose.fn = q[1]; pose.fixT = performance.now(); pose.v = sp / 3.6;
-  if (sp >= 4 && typeof s.bearing === 'number') pose.fh = s.bearing;
+  // Heading: the GPS one, unless it's missing or contradicts the way the car actually moved (some radio GPS
+  // modules report it badly); then the direction between the last two positions.
+  var mv = pose.pe == null ? 0 : Math.hypot(q[0] - pose.pe, q[1] - pose.pn);
+  var course = mv >= 6 ? (Math.atan2(q[0] - pose.pe, q[1] - pose.pn) * 180 / Math.PI + 360) % 360 : null;
+  if (sp >= 4) {
+    var gb = typeof s.bearing === 'number' && s.bearing ? s.bearing : null;
+    if (course != null && (gb == null || Math.abs(angDiff(gb, course)) > 100)) pose.fh = course;
+    else if (gb != null) pose.fh = gb;
+  }
+  if (pose.pe == null || mv >= 6) { pose.pe = q[0]; pose.pn = q[1]; }
   if (!pose.ok) { pose.ok = true; pose.e = pose.te = q[0]; pose.n = pose.tn = q[1]; pose.h = pose.th = pose.fh; }
   if (Date.now() - world.at > 2500) loadRoads();
   loadPois(); checkCams(); detectCountry();
@@ -1023,6 +1067,31 @@ function segNearest(pts, e, n) {
   }
   return best;
 }
+// Where the car is on the route, following it in order: from a little behind the last match up to ~800 m ahead,
+// and penalising stretches that go the other way. Without this, near a U-turn on a two-way avenue the car
+// "jumped" to the opposite carriageway (the return) and the route was drawn backwards.
+function routeMatch(pts, e, n, h, st) {
+  if (st.key !== pts) { st.key = pts; st.i = 1; }
+  var best = null;
+  for (var pass = 0; pass < 2; pass++) {
+    var lo = pass ? 1 : Math.max(1, st.i - 3), run = 0;
+    for (var i = lo; i < pts.length; i++) {
+      var a = pts[i - 1], b = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, l = Math.sqrt(l2);
+      if (!pass && i > st.i) { run += l; if (run > 800) break; }
+      var t = l2 ? Math.max(0, Math.min(1, ((e - a[0]) * dx + (n - a[1]) * dy) / l2)) : 0;
+      var px = a[0] + t * dx, py = a[1] + t * dy, d = Math.hypot(e - px, n - py), cost = d;
+      if (h != null && l > 1 && Math.abs(angDiff(Math.atan2(dx, dy) * 180 / Math.PI, h)) > 100) cost += 60;
+      if (i < st.i) cost += 15;
+      if (!best || cost < best.cost) best = { cost: cost, d: d, i: i, e: px, n: py, t: t * l };
+    }
+    if (best && best.d < 60) break; // found close by, in order
+    if (!pass) best = null;         // lost (detour, GPS jump): search the whole route
+  }
+  if (!best) best = segNearest(pts, e, n);
+  st.i = best.i;
+  return best;
+}
+var matchDrive = {}, matchNav = {};
 function angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
 function nearestSeg(lines, e, n, h, maxD, maxA) {
   var best = null;
@@ -1154,7 +1223,7 @@ function drawWorld(g, W, H, cam) {
   // 4) route: blue lane under the car that follows the streets and turns into the next street, like Tesla
   var rl = routeLocal();
   if (rl) {
-    var sn = segNearest(rl, pose.e, pose.n);
+    var sn = routeMatch(rl, pose.e, pose.n, pose.h, matchDrive);
     var path = [[pose.e, pose.n]], run = Math.hypot(rl[sn.i][0] - pose.e, rl[sn.i][1] - pose.n);
     for (var j = sn.i; j < rl.length && run < 240; j++) { if (j > sn.i) run += Math.hypot(rl[j][0] - rl[j - 1][0], rl[j][1] - rl[j - 1][1]); path.push(rl[j]); }
     // shift to the right-hand lane (Colombia drives on the right)
@@ -1536,6 +1605,13 @@ function setRoute(rt) {
   for (var i = 1; i < nav.route.length; i++) nav.cum.push(nav.cum[i - 1] + hav([nav.route[i - 1][1], nav.route[i - 1][0]], [nav.route[i][1], nav.route[i][0]]));
   nav.steps = [];
   rt.legs.forEach(function (l) { l.steps.forEach(function (st) { nav.steps.push({ loc: st.maneuver.location, type: st.maneuver.type, mod: st.maneuver.modifier || '', name: st.name || '', exit: st.maneuver.exit }); }); });
+  // where each manoeuvre is along the route (km), to skip the ones already behind the car
+  var j0 = 0;
+  nav.steps.forEach(function (st) {
+    var bj = j0, bd = 1e9;
+    for (var j = j0; j < nav.route.length; j++) { var d = hav([st.loc[1], st.loc[0]], [nav.route[j][1], nav.route[j][0]]); if (d < bd) { bd = d; bj = j; } if (d < 0.001) break; }
+    st.km = nav.cum[bj]; j0 = bj;
+  });
   nav.idx = nav.steps.length > 1 ? 1 : 0; nav.offSince = 0;
   drawRoute(); viz.hasRoute = true;
   $('mapwrapEl').classList.add('navon'); $('eta').hidden = false;
@@ -1585,7 +1661,7 @@ function overview(auto) {
   var b = [[Math.min.apply(null, lons), Math.min.apply(null, lats)], [Math.max.apply(null, lons), Math.max.apply(null, lats)]];
   follow = false; $('recenter').classList.remove('follow');
   if (ml && mlReady) ml.fitBounds(b, { padding: { top: 140, bottom: 170, left: 40, right: 70 }, bearing: 0, pitch: 0, duration: 900 });
-  else if (map) map.fitBounds([[b[0][1], b[0][0]], [b[1][1], b[1][0]]], { padding: [60, 60] });
+  else if (map) { headUp(false); map.fitBounds([[b[0][1], b[0][0]], [b[1][1], b[1][0]]], { padding: [60, 60] }); }
   // After a short look at the whole route, go back to following the car (like Tesla).
   if (auto) setTimeout(function () { follow = true; $('recenter').classList.add('follow'); }, 5000);
 }
@@ -1614,8 +1690,8 @@ function applySat() {
       ml.addLayer({ id: 'sat', type: 'raster', source: 'sat' }, first || undefined);
     } else if (!sat && ml.getLayer('sat')) ml.removeLayer('sat');
   } else if (map && tiles) {
-    tiles.setUrl(sat ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-      : 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}');
+    tiles.setUrl(baseTiles());
+    if (sat) headUp(false);
   }
 }
 $('satBtn').onclick = function () { sat = !sat; store.set('sat', sat ? '1' : '0'); applySat(); };
@@ -1654,7 +1730,7 @@ function spokenDist(m) { return m >= 1000 ? (m >= 1500 ? (Math.round(m / 500) / 
 function nearestOnRoute(p) {
   if (world.lat0) { // projection on the route segments (metres), so the remaining distance is exact
     routeLocal();
-    var q = toLocal(p[1], p[0]), sn = segNearest(world.routeRaw, q[0], q[1]);
+    var q = toLocal(p[1], p[0]), sn = routeMatch(world.routeRaw, q[0], q[1], pose.ok ? pose.fh : null, matchNav);
     return { d: sn.d / 1000, i: sn.i, km: nav.cum[sn.i - 1] + sn.t / 1000 };
   }
   var best = 1e9, bi = 0;
@@ -1703,8 +1779,15 @@ function updateNav(s) {
   while (st && st.type !== 'arrive' && hav(p, [st.loc[1], st.loc[0]]) < 0.025 && nav.idx < nav.steps.length - 1) { nav.idx++; st = nav.steps[nav.idx]; }
   if (!st) { box.hidden = true; return; }
   var near = nearestOnRoute(p);
+  // a manoeuvre already left behind on the route (e.g. the U-turn just done) gives way to the next one
+  while (st && st.type !== 'arrive' && near.d < 0.05 && st.km != null && st.km < near.km - 0.03 && nav.idx < nav.steps.length - 1) { nav.idx++; st = nav.steps[nav.idx]; }
   // the part already driven disappears from the map
-  if (near.i !== nav.cut && near.d < 0.05) { nav.cut = near.i; if (ml && mlReady && ml.getSource('route')) ml.getSource('route').setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoords() } }); }
+  if (near.i !== nav.cut && near.d < 0.05) {
+    nav.cut = near.i;
+    var gjc = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoords() } };
+    if (ml && mlReady && ml.getSource('route')) ml.getSource('route').setData(gjc);
+    else if (map && nav.layer) { nav.layer.clearLayers(); nav.layer.addData(gjc); }
+  }
   if (turnIdx !== nav.idx) drawTurnMark();
   // Off the route for 8 s: recalculate (at most every 25 s).
   if (near.d > 0.07) { if (!nav.offSince) nav.offSince = Date.now(); } else nav.offSince = 0;
@@ -1811,8 +1894,8 @@ function render(s) {
     document.querySelectorAll('.music .art').forEach(function (a) { a.style.backgroundImage = url ? 'url(' + url + ')' : ''; a.classList.toggle('has', !!url); });
   }
   $('vol').textContent = s.vol >= 0 ? s.vol : '–';
-  updateMap(s);
   updateDrive(s, sp);
+  updateMap(s);
   updateNav(s);
 }
 function tick() { try { render(JSON.parse(Car.state())); } catch (e) {} }

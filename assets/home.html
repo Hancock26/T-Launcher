@@ -189,6 +189,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .mapctl button + button { border-top: 1px solid var(--outline); }
 .mapctl svg { width: 22px; height: 22px; fill: var(--fg); }
 .mapctl .follow svg { fill: var(--accent); }
+.mapctl .off svg { fill: #e82127; }
 .mapmsg { position: absolute; right: 74px; top: 44px; z-index: 500; padding: 10px 14px; font-size: 13px; color: var(--muted); }
 .applaunch { position: absolute; inset: 0; z-index: 400; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--panel); }
 .applaunch .go { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-radius: 8px; font-size: 18px; font-weight: 600; background: var(--fg); color: var(--panel); }
@@ -447,6 +448,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
           <button type="button" id="zout" aria-label="Alejar"><svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg></button>
           <button type="button" id="satBtn" aria-label="Satélite"><svg viewBox="0 0 24 24"><path d="m11.99 18.54-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg></button>
           <button type="button" id="overview" aria-label="Ver toda la ruta"><svg viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg></button>
+          <button type="button" id="voiceBtn" aria-label="Indicaciones por voz"><svg viewBox="0 0 24 24"><path id="voicePath" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
+          <button type="button" id="micBtn" aria-label="Decir a dónde ir"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg></button>
           <button type="button" id="toHome" aria-label="Agrandar o reducir el mapa"><svg viewBox="0 0 24 24"><path id="expPath" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
         </div>
         <div class="mapattr" id="mapAttr" hidden>© OpenStreetMap · © CARTO</div>
@@ -683,6 +686,23 @@ function baseTiles() {
 // Heading-up for the Leaflet map (it can't rotate by itself): the whole map layer is turned and tilted with CSS,
 // so the way you drive always points up and the road ahead is seen in perspective, like in MapLibre / Tesla.
 var hup = { on: false, rot: 0 };
+function snapPos(s, hd, sp) {
+  if (!world.lat0 || !pose.ok) return null;
+  var q = toLocal(s.lon, s.lat), best = null;
+  if (nav.route && world.routeRaw) {
+    var m = routeMatch(world.routeRaw, q[0], q[1], hd, matchNav);
+    if (m.d < 30) {
+      var a = world.routeRaw[m.i - 1], b = world.routeRaw[m.i];
+      best = [m.e, m.n, sp >= 4 ? (Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI + 360) % 360 : null];
+    }
+  }
+  if (!best && sp >= 8 && world.roads && world.roads.length) {
+    var r = nearestSeg(world.roads, q[0], q[1], hd, 18, 40);
+    if (r) best = [r.e, r.n, null];
+  }
+  if (!best) return null;
+  return [world.lat0 + best[1] / world.ky, world.lon0 + best[0] / world.kx, best[2]];
+}
 function headUp(on, bearing) {
   var el = $('map');
   if (!on) {
@@ -706,6 +726,9 @@ function updateMap(s) {
   if (!s.fix) return;
   var sp = Math.max(0, s.speed || 0), moving = sp >= 8 || !!nav.route;
   var hd = pose.ok ? pose.fh : (s.bearing || 0); lastHeading = hd;
+  // Like Waze / Google: the pointer sits on the blue line (or on the street) instead of where the GPS drifts.
+  var sn = snapPos(s, hd, sp);
+  if (sn) { s = Object.assign({}, s, { lat: sn[0], lon: sn[1] }); if (sn[2] != null) { hd = sn[2]; lastHeading = hd; } }
   // While driving, the map goes back to following the car 12 s after the user moved it.
   if (!follow && sp >= 8 && dragAt && Date.now() - dragAt > 12000) { follow = true; $('recenter').classList.add('follow'); }
   if (ml && mlReady) {
@@ -1630,16 +1653,16 @@ function drawRoute() {
       var first; ml.getStyle().layers.some(function (l) { if (l.type === 'symbol') { first = l.id; return true; } return false; });
       ml.addSource('route', { type: 'geojson', data: gj });
       ml.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#1f47b8', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 16] } }, first);
+        paint: { 'line-color': '#1f47b8', 'line-opacity': 0.35, 'line-blur': 1.5, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 15] } }, first);
       ml.addLayer({ id: 'route', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#3e7bfa', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 17, 11] } }, first);
+        paint: { 'line-color': '#3e7bfa', 'line-opacity': 0.72, 'line-blur': 0.6, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 17, 10] } }, first);
     }
     if (destMarker) { destMarker.remove(); destMarker = null; }
     if (nav.dest) { var el = document.createElement('div'); el.innerHTML = PIN; destMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(nav.dest).addTo(ml); }
   } else if (map && window.L) {
     if (nav.layer) map.removeLayer(nav.layer);
     if (lDest) { map.removeLayer(lDest); lDest = null; }
-    nav.layer = L.geoJSON(gj, { style: { color: '#3e7bfa', weight: 9, opacity: .95 } }).addTo(map);
+    nav.layer = L.geoJSON(gj, { style: { color: '#3e7bfa', weight: 8, opacity: .72, lineCap: 'round', lineJoin: 'round', smoothFactor: 1.5 } }).addTo(map);
     if (nav.dest) lDest = L.marker([nav.dest[1], nav.dest[0]], { icon: L.divIcon({ className: '', html: PIN, iconSize: [30, 40], iconAnchor: [15, 40] }), interactive: false }).addTo(map);
   }
   turnIdx = -1; drawTurnMark();
@@ -1675,6 +1698,39 @@ $('mClose').onclick = function () { endNav(); say('Navegación terminada'); };
 $('etaWaze').onclick = function () {
   if (nav.dest) act('navto:' + nav.dest[1] + ',' + nav.dest[0] + ',' + nav.label.replace(/,/g, ' '));
   else Car.open('app_maps');
+};
+
+// --- voice guidance on / off and spoken destination ---
+var VOICE_ON = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
+var VOICE_OFF = 'M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.8 8.8 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z';
+function voiceOn() { try { return Car.navVoice ? Car.navVoice() : store.get('navvoice', '1') === '1'; } catch (e) { return true; } }
+function paintVoice() { var on = voiceOn(); $('voicePath').setAttribute('d', on ? VOICE_ON : VOICE_OFF); $('voiceBtn').classList.toggle('off', !on); }
+$('voiceBtn').onclick = function () {
+  var on = !voiceOn();
+  try { if (Car.setNavVoice) Car.setNavVoice(on); else store.set('navvoice', on ? '1' : '0'); } catch (e) {}
+  paintVoice(); toast(on ? 'Indicaciones por voz activadas' : 'Indicaciones por voz silenciadas');
+  if (on) say('Indicaciones por voz activadas');
+};
+paintVoice();
+// Tap: say where to go ("llévame a la Calle 72 con 46", "a casa"). Hold: open Gemini / the phone's assistant.
+longPress($('micBtn'), function () {
+  try { if (Car.listen) { Car.listen(); return; } } catch (e) {}
+  toast('El dictado por voz no está disponible en este radio');
+}, function () { try { if (Car.assistant) Car.assistant(); } catch (e) {} });
+window.onVoice = function (text) {
+  var t = String(text || '').trim();
+  if (!t) return;
+  var q = t.replace(/^(ok(ey)?\s+)?(por favor\s+)?(ll[eé]vame|ll[eé]vanos|vamos|ir|navega|navegar|quiero ir|c[oó]mo llego|ruta|dime c[oó]mo llegar)(\s+(hasta|hacia|para|a|al|a la))?\s+/i, '').replace(/[.!?¿¡]+$/, '').trim();
+  var low = q.toLowerCase();
+  if (/^(mi\s+)?casa$/.test(low)) { goPlace('home'); return; }
+  if (/^(el\s+|mi\s+)?(trabajo|oficina)$/.test(low)) { goPlace('work'); return; }
+  toast('Buscando “' + q + '”…');
+  $('navpanel').classList.remove('min'); $('q').value = q; $('qx').hidden = false;
+  showList([], 'Buscando…', 'Buscando “' + esc(q) + '”…');
+  placeSearch(q).then(function (r) {
+    showList(r, 'Resultados', 'No encontré “' + esc(q) + '”. Prueba de nuevo o escríbelo.');
+    if (r.length) pick(r[0]); else say('No encontré ' + q);
+  }).catch(function () { showList([], 'Resultados', 'Sin internet: no se puede buscar'); });
 };
 
 // --- satellite ---

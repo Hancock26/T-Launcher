@@ -323,6 +323,37 @@ public class MainActivity extends Activity implements LocationListener {
             });
         }
 
+        /** Voice guidance on / off (button on the map; same switch as in Ajustes). */
+        @JavascriptInterface
+        public boolean navVoice() {
+            return Prefs.get(MainActivity.this).getBoolean("nav_voice", true);
+        }
+
+        @JavascriptInterface
+        public void setNavVoice(boolean on) {
+            Prefs.get(MainActivity.this).edit().putBoolean("nav_voice", on).apply();
+        }
+
+        /** Speech recognition for the destination ("llévame a…"); the text goes back to window.onVoice. */
+        @JavascriptInterface
+        public void listen() {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    startListening();
+                }
+            });
+        }
+
+        /** Open Gemini / Google Assistant (whatever assistant the radio has). */
+        @JavascriptInterface
+        public void assistant() {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    openAssistant();
+                }
+            });
+        }
+
         @JavascriptInterface
         public void open(final String slot) {
             runOnUiThread(new Runnable() {
@@ -392,6 +423,51 @@ public class MainActivity extends Activity implements LocationListener {
     private boolean navTtsReady;
     private String navPending;
     private volatile String navVoiceName;
+    private static final int REQ_SPEECH = 7301;
+
+    private void startListening() {
+        Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "es-419");
+        i.putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "¿A dónde vamos?");
+        i.putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        try {
+            startActivityForResult(i, REQ_SPEECH);
+        } catch (Exception e) {
+            // no speech recognizer installed: the assistant can still take the request
+            android.widget.Toast.makeText(this, "Este radio no tiene dictado por voz. Abriendo el asistente…", android.widget.Toast.LENGTH_SHORT).show();
+            openAssistant();
+        }
+    }
+
+    private void openAssistant() {
+        Intent[] tries = {
+                new Intent(Intent.ACTION_VOICE_COMMAND),
+                new Intent("android.intent.action.ASSIST"),
+                getPackageManager().getLaunchIntentForPackage("com.google.android.apps.bard"),
+                getPackageManager().getLaunchIntentForPackage("com.google.android.googlequicksearchbox")
+        };
+        for (Intent i : tries) {
+            if (i == null) continue;
+            try {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                return;
+            } catch (Exception ignored) {
+                // try the next one
+            }
+        }
+        android.widget.Toast.makeText(this, "No hay asistente de voz (Gemini / Google) instalado", android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != REQ_SPEECH || result != RESULT_OK || data == null || web == null) return;
+        java.util.ArrayList<String> r = data.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS);
+        if (r == null || r.isEmpty()) return;
+        web.evaluateJavascript("window.onVoice && window.onVoice(" + JSONObject.quote(r.get(0)) + ")", null);
+    }
 
     private void speakNav(String text) {
         if (text == null || text.isEmpty() || !Prefs.get(this).getBoolean("nav_voice", true)) return;

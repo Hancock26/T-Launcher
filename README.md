@@ -2,7 +2,7 @@
 
 # T-Launcher
 
-🌐 **Página y tutorial:** https://t-launcher.vercel.app · **Generador del carro:** https://t-launcher.vercel.app/generador/
+⬇️ **[Descargar T-Launcher.apk](https://github.com/Hancock26/T-Launcher/raw/main/descargas/T-Launcher.apk)** · 🌐 **Página y tutorial:** https://t-launcher.vercel.app · **Generador del carro:** https://t-launcher.vercel.app/generador/
 
 Pantalla de inicio estilo Tesla para radios Android de carro (Android 8 a 14), hecha en Colombia 🇨🇴 por **Jesus Torregroza**.
 
@@ -31,7 +31,7 @@ Pantalla de inicio estilo Tesla para radios Android de carro (Android 8 a 14), h
 
 ### 1. Instalar
 
-1. Descarga **T-Launcher.apk** desde la sección [**Releases**](../../releases) de este repositorio.
+1. Descarga **[T-Launcher.apk](https://github.com/Hancock26/T-Launcher/raw/main/descargas/T-Launcher.apk)** (está en la carpeta `descargas/` de este repositorio).
 2. Pásalo al radio con una USB, o descárgalo directo en el radio.
 3. Ábrelo con el explorador de archivos y toca **Instalar**. Si el radio lo pide, permite *instalar apps de origen desconocido*.
 
@@ -118,7 +118,7 @@ ANDROID_JAR=/ruta/platforms/android-33/android.jar sh build_linux.sh   # → bui
 
 - `assets/home.html`: toda la interfaz (WebView), con el mapa (MapLibre + OpenFreeMap), la vista de conducción en canvas y la navegación.
 - `src/com/simple/carlauncher/`: puente con Android (GPS, música, luces, voz, buscador de direcciones), Ajustes y pico y placa.
-- `docs/generador/`: generador web de paquetes del carro (three.js). Actívalo con **GitHub Pages** (Settings › Pages › rama principal, carpeta `/docs`).
+- `docs/generador/`: generador web de paquetes del carro (three.js). Actívalo con **GitHub Pages** (Settings › Pages › rama principal, carpeta `/docs`). Hoy la página pública está en https://t-launcher.vercel.app.
 
 ### Actualizar las reglas de pico y placa
 

@@ -618,6 +618,12 @@ public class MainActivity extends Activity implements LocationListener {
         }
         startGps();
         handler.post(periodic);
+        // New-version notice, 10 s after opening and only with the car stopped (never while driving).
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                if (speedKmh < 5 && !isFinishing()) Updater.check(MainActivity.this, false);
+            }
+        }, 10000);
     }
 
     @Override

@@ -1,0 +1,1835 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>T-Launcher</title>
+<link rel="stylesheet" href="leaflet.css">
+<link rel="stylesheet" href="maplibre-gl.css">
+<style>
+/*
+  Layout after the "Tesla Dashboard UI Component Library" by Nami (Figma Community, CC BY 4.0):
+  two views over a black control bar.
+    Inicio: car on a studio floor with reflection, callouts, Music + Navigate cards.
+    Mapa:   left panel (gear, tell-tales, car from above, music) + live map.
+  White by day, black by night / with headlights.
+*/
+@font-face { font-family: Inter; font-weight: 300; src: url(fonts/inter-latin-300-normal.woff2) format("woff2"); }
+@font-face { font-family: Inter; font-weight: 400; src: url(fonts/inter-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: Inter; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: Inter; font-weight: 600; src: url(fonts/inter-latin-600-normal.woff2) format("woff2"); }
+:root {
+  --stage-top: #fafafa;     /* studio wall */
+  --stage-floor: #e3e3e3;   /* studio floor */
+  --panel: #fafafa;
+  --card: #fafafa;
+  --fg: #171717;
+  --muted: #757575;
+  --inactive: #a2a3a5;
+  --outline: #d0d1d2;
+  --ok: #19b34a;            /* tell-tale green */
+  --bad: #e5322c;
+  --warn: #e08a00;
+  --accent: #3e6ae1;
+  --shadow: 5px -3px 30px 20px rgba(117,117,117,.10), -2px -2px 20px 8px rgba(117,117,117,.08), 1px 1px 12px 2px rgba(65,65,65,.07);
+  --reflect: .22;
+  --barbg: #fafafa;
+  --road: #e6e7e9;
+  --lane: #ffffff;
+  --dbg: #eceef1;
+  --mcard: rgba(250,250,250,.92);
+  --font: Inter, "Roboto", system-ui, sans-serif;
+}
+:root[data-theme="dark"] {
+  --stage-top: #414141;
+  --stage-floor: #0d0d0d;
+  --panel: #1e1e1e;
+  --card: #414141;
+  --fg: #ffffff;
+  --muted: #a2a3a5;
+  --inactive: #757575;
+  --outline: #5a5a5a;
+  --shadow: 0 4px 24px rgba(0,0,0,.45);
+  --reflect: .30;
+  --barbg: linear-gradient(180deg, #161616, #000);
+  --road: #262626;
+  --lane: #8a8a8a;
+  --dbg: #000000;
+  --mcard: rgba(40,40,42,.92);
+}
+[hidden] { display: none !important; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body { background: #000; color: var(--fg); font-family: var(--font); overflow: hidden; user-select: none; -webkit-user-select: none; }
+svg { display: block; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.app { height: 100%; display: grid; grid-template-rows: 1fr 66px; }
+.screen { position: relative; overflow: hidden; min-height: 0; }
+.view { position: absolute; inset: 0; transition: opacity .35s; }
+.view.off { opacity: 0; pointer-events: none; }
+
+/* ---------- shared bits ---------- */
+.gear { display: flex; gap: 5px; font-size: 13px; font-weight: 600; letter-spacing: .04em; color: var(--inactive); }
+.gear b { color: var(--fg); font-weight: 600; }
+.tells { display: flex; flex-direction: column; gap: 6px; }
+.tell svg { width: 26px; height: 26px; }
+.tell.lamp svg { fill: var(--inactive); stroke: var(--inactive); }
+.lights-on .tell.lamp svg { fill: var(--ok); stroke: var(--ok); }
+.ic { width: 22px; height: 22px; fill: var(--fg); }
+.card { background: var(--card); border-radius: 6px; box-shadow: var(--shadow); }
+.music { display: grid; grid-template-rows: 54px 2px 46px; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.music .top { display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: 12px; padding-right: 12px; }
+.music .art { width: 54px; height: 54px; background: #c9c9c9 center/cover no-repeat; display: grid; place-items: center; }
+.music .art svg { width: 24px; height: 24px; fill: #fff; }
+.music .art.has svg { display: none; }
+.music .meta { min-width: 0; }
+.music .title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music .artist { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.music .artist svg { width: 11px; height: 11px; fill: var(--muted); flex: none; }
+.music .src { font-size: 11px; color: var(--muted); }
+.music .bar { background: var(--outline); position: relative; }
+.music .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--fg); width: 0; }
+.music .bar i::after { content: ""; position: absolute; right: -3px; top: -2px; width: 6px; height: 6px; border-radius: 3px; background: var(--fg); }
+.music .ctl { display: flex; align-items: center; min-width: 0; }
+.music .ctl button { flex: 1 1 0; min-width: 0; height: 46px; display: grid; place-items: center; }
+.music .ctl button:active { background: var(--outline); }
+.music .ctl svg { width: 22px; height: 22px; fill: var(--fg); }
+.music .ctl .dim svg { fill: var(--inactive); }
+.nav { display: grid; grid-template-rows: 54px 1px 46px; overflow: hidden; }
+.nav .search { display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 15px; font-weight: 500; color: var(--muted); }
+.nav .search svg { width: 18px; height: 18px; fill: var(--muted); }
+.nav hr { margin: 0; border: 0; background: var(--outline); height: 1px; }
+.nav .places { display: grid; grid-template-columns: 1fr 1px 1fr; align-items: center; }
+.nav .places i { height: 26px; background: var(--outline); }
+.nav .places button { height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--muted); }
+.nav .places svg { width: 17px; height: 17px; fill: var(--muted); }
+.nav button:active, .nav .search:active { background: var(--outline); }
+.dots { display: flex; gap: 6px; justify-content: center; }
+.dots i { width: 5px; height: 5px; border-radius: 3px; background: var(--inactive); }
+.dots i.on { background: var(--fg); }
+.toast { position: absolute; left: 50%; top: 56px; transform: translateX(-50%); z-index: 900; background: var(--fg); color: var(--panel);
+  font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: 16px; opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; }
+.toast.show { opacity: .92; }
+
+/* ---------- Inicio (studio) ---------- */
+#home { background: linear-gradient(180deg, var(--stage-top) 0%, var(--stage-top) 52%, var(--stage-floor) 100%); transition: background .5s; }
+.statusbar { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 18px; z-index: 5; }
+.statusbar .left { display: flex; align-items: center; gap: 12px; }
+.statusbar .dot { width: 3px; height: 3px; border-radius: 2px; background: var(--muted); }
+.statusbar .fuel { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
+.statusbar .fuel svg { width: 14px; height: 14px; fill: var(--fg); }
+.statusbar .mid { display: flex; align-items: center; gap: 22px; font-size: 16px; font-weight: 500; color: var(--muted); }
+.statusbar .mid button { display: flex; align-items: center; gap: 8px; }
+.statusbar .mid svg { width: 22px; height: 22px; fill: var(--muted); }
+.statusbar .right { display: flex; align-items: center; justify-content: flex-end; gap: 18px; font-size: 17px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge { font-size: 9px; font-weight: 600; line-height: 1.1; color: #fff; background: var(--bad); border-radius: 4px; padding: 4px 7px; text-align: center; letter-spacing: .03em; }
+#home .tells { position: absolute; left: 14px; top: 48px; z-index: 5; }
+.stage { position: absolute; left: 50%; top: 50%; width: min(54%, 520px); transform: translate(-50%, -50%); aspect-ratio: 728 / 403; }
+.stage img, .stage svg.generic { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: opacity .6s; }
+.stage .lit { opacity: 0; }
+.lights-on .stage .lit.has { opacity: 1; }
+.lights-on .stage .base.swap { opacity: 0; }
+.mirror { position: absolute; left: 0; right: 0; top: 96%; height: 70%; transform: scaleY(-1); opacity: var(--reflect); pointer-events: none;
+  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,.9), transparent 55%); mask-image: linear-gradient(to top, rgba(0,0,0,.9), transparent 55%); }
+.mirror img, .mirror svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.callout { position: absolute; display: flex; flex-direction: column; align-items: flex-start; font-size: 11px; color: var(--muted); }
+.callout b { font-size: 13px; font-weight: 600; color: var(--fg); }
+.callout::before { content: ""; position: absolute; left: -7px; top: 2px; width: 1px; height: var(--line, 60px); background: var(--muted); }
+.callout.hood { left: 6%; top: 16%; --line: 64px; }
+.callout.trunk { left: 96%; top: 0%; --line: 56px; }
+.lockpin { position: absolute; left: 47%; top: -9%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
+.lockpin svg { width: 26px; height: 26px; fill: var(--fg); }
+.lockpin i { width: 1px; height: 34px; background: var(--muted); margin-top: 4px; }
+.lamppin { position: absolute; left: -9%; top: 58%; display: flex; align-items: center; gap: 4px; }
+.lamppin i { width: 14px; height: 1px; background: var(--muted); }
+.lamppin svg { width: 22px; height: 22px; fill: var(--inactive); stroke: var(--inactive); }
+.lights-on .lamppin svg { fill: var(--ok); stroke: var(--ok); }
+.homecards { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: grid; grid-template-columns: 340px 240px; gap: 10px; z-index: 6; }
+#home .dots { position: absolute; left: 0; right: 0; bottom: 4px; }
+
+/* ---------- Mapa ---------- */
+#mapview { display: grid; grid-template-columns: 34% 1fr; }
+.side { background: var(--panel); display: flex; flex-direction: column; padding: 12px 12px 10px; min-height: 0; transition: background .5s; z-index: 2; }
+.side .head { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 10px; border-bottom: 1px solid var(--outline); }
+.side .speed { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.side .body { flex: 1; position: relative; min-height: 0; }
+.side .tells { position: absolute; left: 2px; top: 10px; }
+.side .speedbig { position: absolute; right: 4px; top: 8px; text-align: right; }
+.side .speedbig .n { font-size: 46px; font-weight: 300; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.side .speedbig .u { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .08em; }
+.topcar { position: absolute; left: 50%; top: 56%; height: 50%; aspect-ratio: 318 / 586; transform: translate(-50%, -50%); }
+.topcar img, .topcar svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: opacity .6s; }
+.topcar .lit { opacity: 0; }
+.lights-on .topcar .lit.has { opacity: 1; }
+.lights-on .topcar .base.swap { opacity: 0; }
+.side .chips { display: flex; gap: 6px; justify-content: center; margin: 6px 0 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; font-size: 12px; font-weight: 600; color: #fff; }
+.chip.bad { background: var(--bad); }
+.chip.warn { background: var(--warn); }
+.mapwrap { position: relative; min-width: 0; }
+#map { position: absolute; inset: 0; background: #e9e9e9; }
+:root[data-theme="dark"] #map { background: #1a1a1a; }
+:root[data-theme="dark"] #map .maplibregl-canvas { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.92) saturate(.5); }
+.maplibregl-ctrl-attrib { font-size: 9px; }
+:root[data-theme="dark"] #map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(.9) saturate(.4); }
+:root:not([data-theme="dark"]) #map .leaflet-tile-pane { filter: saturate(.25) brightness(1.04); }
+.leaflet-container { font-family: var(--font); }
+.leaflet-control-attribution { font-size: 9px; background: rgba(250,250,250,.8) !important; color: #757575 !important; }
+.leaflet-control-attribution a { color: #757575 !important; }
+.mapsearch { position: absolute; left: 12px; top: 12px; width: min(300px, calc(100% - 80px)); height: 46px; z-index: 500; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  font-size: 15px; font-weight: 500; color: var(--muted); }
+.mapsearch svg { width: 20px; height: 20px; fill: var(--muted); }
+.mapctl { position: absolute; right: 12px; top: 12px; z-index: 500; display: flex; flex-direction: column; overflow: hidden; }
+.mapctl button { width: 46px; height: 46px; display: grid; place-items: center; }
+.mapctl button + button { border-top: 1px solid var(--outline); }
+.mapctl svg { width: 22px; height: 22px; fill: var(--fg); }
+.mapctl .follow svg { fill: var(--accent); }
+.mapmsg { position: absolute; right: 74px; top: 44px; z-index: 500; padding: 10px 14px; font-size: 13px; color: var(--muted); }
+.applaunch { position: absolute; inset: 0; z-index: 400; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--panel); }
+.applaunch .go { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-radius: 8px; font-size: 18px; font-weight: 600; background: var(--fg); color: var(--panel); }
+.applaunch .go svg { width: 22px; height: 22px; fill: var(--panel); }
+.applaunch .alt { font-size: 14px; color: var(--muted); }
+
+/* ---------- Drive view (Tesla FSD-style visualization) ---------- */
+#drive { background: var(--dbg); }
+#viz { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dcar { position: absolute; left: 50%; bottom: 25%; width: 168px; aspect-ratio: 318 / 396; transform: translateX(-50%); pointer-events: none; }
+.dcar.chase { width: 138px; aspect-ratio: 384 / 626; bottom: 24%; }
+.dcar img, .dcar svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: opacity .6s; }
+.dcar .lit { opacity: 0; } .lights-on .dcar .lit { opacity: 1; } .lights-on .dcar .base.swap { opacity: 0; }
+.dhud { position: absolute; left: 18px; top: 12px; display: flex; flex-direction: column; gap: 2px; z-index: 3; }
+.dhud .trip, .dhud .u, .dhud .gear, .dhud .sp { text-shadow: 0 0 6px var(--dbg), 0 0 3px var(--dbg); }
+.dhud .row1 { display: flex; align-items: center; gap: 10px; }
+.dhud .ready { font-size: 12px; font-weight: 600; color: var(--ok); letter-spacing: .04em; }
+.dhud .sp { font-size: 64px; font-weight: 400; line-height: 1; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
+.dhud .sp.over { color: var(--bad); }
+.s80 { color: #ff9500 !important; } .s100 { color: #ff3b30 !important; }
+.dhud .u { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .08em; }
+.dhud .lim { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.dhud .limit { margin: 0; }
+.dhud .tell svg { width: 24px; height: 24px; }
+.dhud .trip { margin-top: 6px; }
+.drivecards { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: grid; grid-template-columns: 330px 230px; gap: 10px; z-index: 5; }
+#drive .card { background: var(--mcard); box-shadow: none; }
+/* car marker on the maps */
+.carmark { width: 34px; height: 62px; display: block; }
+.tptr { display: block; width: 40px; height: 40px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+.carmark img, .carmark svg { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); }
+
+
+/* ---------- Tesla split layout: car / driving view on the left, the map always on the right ---------- */
+.screen { --lw: 43%; }
+#home, #drive { right: auto; width: var(--lw); transition: opacity .35s, width .45s; }
+#mapview { left: var(--lw); display: block; transition: left .45s; }
+#mapview .side { display: none; }
+#mapview .mapwrap { position: absolute; inset: 0; }
+.screen.mapfull #mapview { left: 0; }
+.screen.mapfull #home, .screen.mapfull #drive { opacity: 0; pointer-events: none; }
+.stage { width: 88%; top: 47%; }
+.homecards, .drivecards { grid-template-columns: minmax(0, 360px); }
+#navHome, #navDrive { display: none; }
+.statusbar .mid { gap: 14px; }
+.callout.trunk { left: 90%; }
+.mtop { position: absolute; right: 74px; top: 14px; z-index: 450; display: flex; gap: 14px; font-size: 15px; font-weight: 600;
+  color: var(--fg); text-shadow: 0 0 6px var(--panel), 0 0 2px var(--panel); font-variant-numeric: tabular-nums; pointer-events: none; }
+#map.sat .maplibregl-canvas, #map.sat .leaflet-tile-pane { filter: none !important; }
+:root[data-theme="dark"] #map.sat .maplibregl-canvas { filter: brightness(.8) !important; }
+
+/* navigation panel */
+.navpanel { position: absolute; left: 12px; top: 12px; width: min(300px, calc(100% - 84px)); z-index: 520; overflow: hidden; display: flex; flex-direction: column; max-height: calc(100% - 24px); }
+.navpanel .q { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px 0 14px; flex: none; }
+.navpanel .q > svg { width: 20px; height: 20px; fill: var(--muted); flex: none; }
+.navpanel input { flex: 1; min-width: 0; height: 40px; border: 0; outline: 0; background: none; font: 500 15px var(--font); color: var(--fg); }
+.navpanel input::placeholder { color: var(--muted); }
+.navpanel input::-webkit-search-cancel-button { display: none; }
+.navpanel .qx { width: 34px; height: 34px; display: grid; place-items: center; }
+.navpanel .qx svg { width: 18px; height: 18px; fill: var(--muted); }
+.navpanel .more { border-top: 1px solid var(--outline); display: flex; flex-direction: column; min-height: 0; }
+.navpanel.min .more { display: none; }
+.places2 { display: grid; grid-template-columns: 1fr 1fr; flex: none; }
+.places2 button { height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--fg); }
+.places2 button + button { border-left: 1px solid var(--outline); }
+.places2 svg { width: 17px; height: 17px; fill: var(--fg); }
+.places2 button:active, .navpanel .row:active { background: var(--outline); }
+.tabs { padding: 10px 16px 4px; font-size: 13px; font-weight: 600; color: var(--fg); border-top: 1px solid var(--outline); flex: none; }
+.navpanel .list { overflow-y: auto; min-height: 0; padding-bottom: 6px; }
+.navpanel .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 9px 16px; cursor: pointer; }
+.navpanel .row b { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navpanel .row span { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navpanel .row i { font-style: normal; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
+.navpanel .row i svg { width: 18px; height: 18px; fill: var(--muted); }
+.navpanel .empty { padding: 10px 16px 14px; font-size: 12px; color: var(--muted); }
+
+/* turn card (white Tesla card over the map) */
+.maneuver { position: absolute; left: 12px; top: 12px; z-index: 530; width: min(330px, calc(100% - 84px)); border-radius: 8px; overflow: hidden;
+  background: var(--panel); color: var(--fg); box-shadow: var(--shadow); display: grid; grid-template-columns: 64px 1fr; }
+.maneuver .ico { grid-row: 1; width: 64px; display: grid; place-items: center; background: var(--fg); }
+.maneuver .ico svg, .maneuver .ico img { width: 40px; height: 40px; fill: var(--panel); object-fit: contain; }
+.maneuver .mt { padding: 10px 14px; min-width: 0; }
+.maneuver .d { font-size: 24px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.maneuver .t { font-size: 14px; font-weight: 500; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.maneuver .src { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.maneuver .next { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--outline); }
+.maneuver .next svg { width: 16px; height: 16px; fill: var(--muted); }
+.navon .navpanel { display: none; }
+
+/* arrival card */
+.eta { position: absolute; left: 12px; bottom: 12px; z-index: 520; width: min(330px, calc(100% - 84px)); padding: 12px 14px 0; }
+.eta1 { display: flex; align-items: baseline; gap: 8px; }
+.eta1 b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.eta1 span, .eta2 { font-size: 13px; color: var(--muted); }
+.eta2 { display: flex; gap: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.etabar { height: 4px; border-radius: 2px; background: var(--outline); margin: 10px 0 0; overflow: hidden; }
+.etabar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .8s; }
+.etabtn { display: grid; grid-template-columns: 1fr 1fr; margin: 8px -14px 0; border-top: 1px solid var(--outline); }
+.etabtn button { height: 44px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.etabtn button.end { color: var(--bad); border-left: 1px solid var(--outline); }
+.etabtn button:active { background: var(--outline); }
+.turnmark { width: 30px; height: 30px; border-radius: 50%; background: #fff; display: grid; place-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.4); border: 2px solid #1f47b8; }
+.turnmark svg { width: 20px; height: 20px; fill: #1f47b8; }
+.maneuver { cursor: pointer; }
+.maneuver .tlist { grid-column: 1 / -1; display: none; max-height: 240px; overflow-y: auto; border-top: 1px solid var(--outline); }
+.maneuver.open .tlist { display: block; }
+.maneuver .trow { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 8px 14px; font-size: 13px; border-bottom: 1px solid var(--outline); }
+.maneuver .trow svg { width: 20px; height: 20px; fill: var(--fg); }
+.maneuver .trow b { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dturn { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 10px 6px 6px; border-radius: 8px; background: var(--mcard); max-width: 230px; }
+.dturn > span { width: 30px; height: 30px; display: grid; place-items: center; }
+.dturn svg, .dturn img { width: 26px; height: 26px; fill: var(--fg); object-fit: contain; }
+.dturn b { display: block; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dturn div span { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+/* destination pin */
+.destpin { width: 30px; height: 40px; }
+.destpin svg { width: 30px; height: 40px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); }
+
+/* ---------- Bottom bar: white by day, black by night; monochrome icons ---------- */
+.bar { background: var(--barbg); border-top: 1px solid var(--outline); display: grid; grid-template-columns: 74px 120px 1fr 120px 150px; align-items: center; color: var(--fg); transition: background .5s; }
+.bar .carbtn { display: grid; place-items: center; height: 66px; }
+.bar .carbtn svg { width: 30px; height: 30px; fill: var(--fg); }
+.temp { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 24px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.temp button, .volc button { width: 30px; height: 50px; display: grid; place-items: center; }
+.temp svg, .volc .chev svg { width: 14px; height: 14px; fill: var(--inactive); }
+.temp span { min-width: 44px; text-align: center; }
+.bar .apps { display: flex; justify-content: center; gap: 26px; }
+.app-i { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 12px; transition: transform .12s, background .12s; }
+.app-i:active { transform: scale(.88); background: var(--outline); }
+.app-i svg { width: 28px; height: 28px; fill: var(--fg); }
+.volc { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.volc .lvl { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--muted); min-width: 54px; justify-content: center; font-variant-numeric: tabular-nums; }
+.volc .lvl svg { width: 26px; height: 26px; fill: var(--fg); }
+
+/* ---------- 360° car ---------- */
+.stage.spin { cursor: grab; touch-action: none; }
+.stage .callout, .stage .lockpin, .stage .lamppin { transition: opacity .3s; }
+.stage.turned .callout, .stage.turned .lockpin, .stage.turned .lamppin { opacity: 0; pointer-events: none; }
+.spinhint { position: absolute; left: 50%; bottom: -2%; transform: translateX(-50%); font-size: 11px; color: var(--inactive); letter-spacing: .04em; white-space: nowrap; transition: opacity .6s; }
+
+/* ---------- Driving view: parked = car from above; in motion the camera swings behind the car ---------- */
+.side .body { perspective: 520px; perspective-origin: 50% 30%; }
+.road { transition: transform 1.3s cubic-bezier(.4,0,.2,1), width 1.3s; transform-origin: 50% 100%; }
+.side.driving .road { transform: translateX(-50%) rotateX(62deg); width: 70%; }
+.topcar { transition: opacity .7s, transform 1.3s cubic-bezier(.4,0,.2,1); }
+.side.driving .topcar { opacity: 0; transform: translate(-50%, -30%) rotateX(60deg) scale(.8); }
+.rearcar { position: absolute; left: 50%; bottom: 4%; width: 46%; aspect-ratio: 318 / 396; transform: translateX(-50%) scale(1.25) rotateY(25deg);
+  opacity: 0; transition: opacity .9s .35s, transform 1.3s cubic-bezier(.4,0,.2,1); pointer-events: none; }
+.side.driving .rearcar { opacity: 1; transform: translateX(-50%) scale(1) rotateY(0); }
+.rearcar img, .rearcar svg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: opacity .6s; }
+.rearcar .lit { opacity: 0; } .lights-on .rearcar .lit { opacity: 1; } .lights-on .rearcar .base.swap { opacity: 0; }
+.limit { margin: 6px 0 0 auto; width: 40px; height: 40px; border-radius: 50%; background: #fff; border: 5px solid #e5322c; display: grid; place-items: center;
+  font-size: 15px; font-weight: 700; color: #171717; font-variant-numeric: tabular-nums; }
+.speedbig.over .n { color: var(--bad); }
+.trip { font-size: 11px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.side .speedbig { z-index: 3; }
+
+.road { position: absolute; left: 50%; top: 0; bottom: 0; width: 54%; transform: translateX(-50%); background: var(--road);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(to bottom, transparent, #000 18%, #000 82%, transparent); }
+.road i { position: absolute; top: 0; bottom: 0; width: 3px; background-image: repeating-linear-gradient(to bottom, var(--lane) 0 26px, transparent 26px 56px); background-position-y: var(--off, 0px); }
+.road i.l1 { left: 33%; } .road i.l2 { left: 67%; }
+.road b { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--lane); opacity: .7; }
+.road b.e1 { left: 2%; } .road b.e2 { right: 2%; }
+@media (max-width: 900px) {
+  .bar { grid-template-columns: 60px 100px 1fr 100px 130px; }
+  .bar .apps { gap: 10px; }
+  .homecards { grid-template-columns: 300px 210px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="screen" id="screen">
+    <!-- ======================= Inicio ======================= -->
+    <section class="view" id="home" aria-label="Inicio">
+      <div class="statusbar">
+        <div class="left">
+          <div class="gear" id="gear1"><span>P</span><span>R</span><span>N</span><span>D</span></div>
+          <i class="dot"></i>
+          <span class="fuel" id="oil1"><svg viewBox="0 0 24 24"><path d="M12 2.7 6.3 8.4a8 8 0 1 0 11.4 0z"/></svg><span>--</span></span>
+        </div>
+        <div class="mid">
+          <button type="button" id="lockBtn" aria-label="Seguro (simulado)"><svg viewBox="0 0 24 24"><path id="lockPath" d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm6-9h-1V6a5 5 0 0 0-10 0h2a3 3 0 0 1 6 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2z"/></svg></button>
+          <button type="button" id="profile"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span id="name">Conductor</span></button>
+        </div>
+        <div class="right">
+          <span id="time1">--:--</span><span id="temp1">--°C</span>
+          <span class="badge" id="pico1" hidden>PICO Y<br>PLACA</span>
+        </div>
+      </div>
+      <div class="tells">
+        <span class="tell lamp"><svg viewBox="0 0 24 24"><path stroke="none" d="M13 5.5C9 5.5 6 8.4 6 12s3 6.5 7 6.5c1.1 0 2-.5 2-1.6V7.1c0-1.1-.9-1.6-2-1.6z"/><path fill="none" stroke-width="2" stroke-linecap="round" d="M2 8h3M2 12h3M2 16h3"/></svg></span>
+      </div>
+      <div class="stage" id="stage">
+        <div class="mirror" id="mirror"></div>
+        <div id="carHome"></div>
+        <div class="callout hood" data-sim="Capó"><span>Abrir</span><b>Capó</b></div>
+        <div class="callout trunk" data-sim="Baúl"><span>Baúl</span><b>Abrir</b></div>
+        <div class="lockpin"><svg viewBox="0 0 24 24"><path id="lockPin" d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm6-9h-1V6a5 5 0 0 0-10 0h2a3 3 0 0 1 6 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2z"/></svg><i></i></div>
+        <div class="lamppin"><svg viewBox="0 0 24 24"><path stroke="none" d="M13 5.5C9 5.5 6 8.4 6 12s3 6.5 7 6.5c1.1 0 2-.5 2-1.6V7.1c0-1.1-.9-1.6-2-1.6z"/><path fill="none" stroke-width="2" stroke-linecap="round" d="M2 8h3M2 12h3M2 16h3"/></svg><i></i></div>
+      </div>
+      <div class="homecards">
+        <div class="card music" data-music></div>
+        <div class="card nav" id="navHome"></div>
+      </div>
+      <div class="dots"><i class="on"></i><i></i></div>
+    </section>
+
+    <!-- ======================= Mapa ======================= -->
+    <section class="view" id="mapview" aria-label="Mapa">
+      <div class="side">
+        <div class="head">
+          <div class="gear" id="gear2"><span>P</span><span>R</span><span>N</span><span>D</span></div>
+          <span class="speed" id="oil2">--</span>
+        </div>
+        <div class="body">
+          <div class="tells"><span class="tell lamp"><svg viewBox="0 0 24 24"><path stroke="none" d="M13 5.5C9 5.5 6 8.4 6 12s3 6.5 7 6.5c1.1 0 2-.5 2-1.6V7.1c0-1.1-.9-1.6-2-1.6z"/><path fill="none" stroke-width="2" stroke-linecap="round" d="M2 8h3M2 12h3M2 16h3"/></svg></span></div>
+          <div class="speedbig" id="speedbox"><div class="n" id="speed">0</div><div class="u">KM/H</div><div class="limit" id="limit" hidden><span id="limitN">--</span></div><div class="trip" id="trip"></div></div>
+          <div class="road" id="road"><b class="e1"></b><i class="l1"></i><i class="l2"></i><b class="e2"></b></div>
+          <div class="topcar" id="carTop"></div>
+          <div class="rearcar" id="carRear"></div>
+        </div>
+        <div class="chips"><span class="chip bad" id="pico2" hidden>Pico y placa</span><span class="chip warn" id="oilWarn" hidden></span></div>
+        <div class="card music" data-music></div>
+      </div>
+      <div class="mapwrap" id="mapwrapEl">
+        <div id="map"></div>
+        <!-- Tesla-style navigation panel: search, Casa / Trabajo, recents and results -->
+        <div class="card navpanel" id="navpanel">
+          <label class="q"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg><input id="q" type="search" placeholder="Navegar" autocomplete="off" enterkeyhint="search"><button type="button" class="qx" id="qx" aria-label="Cerrar" hidden><svg viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button></label>
+          <div class="more" id="npMore">
+            <div class="places2"><button type="button" id="pHome"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Casa</button><button type="button" id="pWork"><svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/></svg>Trabajo</button></div>
+            <div class="tabs" id="npTitle">Recientes</div>
+            <div class="list" id="npList"></div>
+          </div>
+        </div>
+        <!-- Turn card (own route or Waze / Google Maps instructions) -->
+        <div class="maneuver" id="maneuver" hidden>
+          <div class="ico" id="mIco"></div>
+          <div class="mt"><div class="d" id="mDist"></div><div class="t" id="mText"></div><div class="src" id="mSrc"></div></div>
+          <div class="next" id="mNext" hidden></div>
+          <div class="tlist" id="mList"></div>
+        </div>
+        <!-- Trip summary -->
+        <div class="card eta" id="eta" hidden>
+          <div class="eta1"><b id="etaTime">--:--</b><span>llegada</span></div>
+          <div class="eta2"><span id="etaMin">-- min</span><span id="etaKm">-- km</span></div>
+          <div class="etabar"><i id="etaBar"></i></div>
+          <div class="etabtn"><button type="button" id="etaWaze">Abrir en Waze</button><button type="button" class="end" id="mClose">Terminar</button></div>
+        </div>
+        <div class="mtop"><span id="mtime">--:--</span><span id="mtemp">--°C</span></div>
+        <div class="card mapctl">
+          <button type="button" class="follow" id="recenter" aria-label="Centrar"><svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></button>
+          <button type="button" id="zin" aria-label="Acercar"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+          <button type="button" id="zout" aria-label="Alejar"><svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg></button>
+          <button type="button" id="satBtn" aria-label="Satélite"><svg viewBox="0 0 24 24"><path d="m11.99 18.54-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg></button>
+          <button type="button" id="overview" aria-label="Ver toda la ruta"><svg viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg></button>
+          <button type="button" id="toHome" aria-label="Agrandar o reducir el mapa"><svg viewBox="0 0 24 24"><path id="expPath" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
+        </div>
+        <div class="card mapmsg" id="mapMsg" hidden>El mapa no carga. Revisa la conexión a internet.</div>
+        <div class="applaunch" id="appLaunch" hidden>
+          <button class="go" id="appGo" type="button"><svg viewBox="0 0 24 24"><path d="M12 2 4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg><span id="appGoText">Abrir mapas</span></button>
+          <button class="alt" id="appChange" type="button">Cambiar app de mapas</button>
+        </div>
+      </div>
+    </section>
+    <!-- ======================= Conduciendo ======================= -->
+    <section class="view off" id="drive" aria-label="Conduciendo">
+      <canvas id="viz"></canvas>
+      <div class="dcar" id="dcar"></div>
+      <div class="dhud">
+        <div class="row1"><div class="gear" id="gear3"><span>P</span><span>R</span><span>N</span><b>D</b></div><span class="ready">LISTO</span></div>
+        <div class="sp" id="dsp">0</div><div class="u">KM/H</div>
+        <div class="lim"><div class="limit" id="dlimit" hidden><span id="dlimitN">--</span></div>
+          <span class="tell lamp"><svg viewBox="0 0 24 24"><path stroke="none" d="M13 5.5C9 5.5 6 8.4 6 12s3 6.5 7 6.5c1.1 0 2-.5 2-1.6V7.1c0-1.1-.9-1.6-2-1.6z"/><path fill="none" stroke-width="2" stroke-linecap="round" d="M2 8h3M2 12h3M2 16h3"/></svg></span></div>
+        <div class="trip" id="dtrip"></div>
+        <div class="trip" id="dvias"></div>
+        <div class="dturn" id="dturn" hidden><span id="dtIco"></span><div><b id="dtDist"></b><span id="dtName"></span></div></div>
+      </div>
+      <div class="drivecards"><div class="card music" data-music></div><div class="card nav" id="navDrive"></div></div>
+    </section>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <!-- ======================= Bottom bar ======================= -->
+  <nav class="bar" aria-label="Controles">
+    <button class="carbtn" id="bCar" type="button" aria-label="Ajustes del carro"><svg viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg></button>
+    <div class="temp" data-temp="driver"><button type="button" data-d="-1" aria-label="Bajar"><svg viewBox="0 0 24 24"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button><span>22</span><button type="button" data-d="1" aria-label="Subir"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button></div>
+    <div class="apps">
+      <button class="app-i a-phone" data-slot="app_phone" type="button" aria-label="Teléfono"><svg viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg></button>
+      <button class="app-i a-radio" data-slot="app_radio" type="button" aria-label="Radio"><svg viewBox="0 0 24 24"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm13-8h-2v-2h-2v2H4V8h16v4z"/></svg></button>
+      <button class="app-i a-music" data-slot="app_music" type="button" aria-label="Música"><svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></button>
+      <button class="app-i a-maps" data-slot="app_maps" type="button" aria-label="Mapas"><svg viewBox="0 0 24 24"><path d="M12 2 4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg></button>
+      <button class="app-i a-eq" data-slot="app_eq" type="button" aria-label="Sonido"><svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg></button>
+      <button class="app-i a-apps" id="bApps" type="button" aria-label="Aplicaciones"><svg viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
+      <button class="app-i a-off" id="bOff" type="button" aria-label="Pantalla negra"><svg viewBox="0 0 24 24"><path d="M9 2c-1.05 0-2.05.16-3 .46 4.06 1.27 7 5.06 7 9.54 0 4.48-2.94 8.27-7 9.54.95.3 1.95.46 3 .46 5.52 0 10-4.48 10-10S14.52 2 9 2z"/></svg></button>
+    </div>
+    <div class="temp" data-temp="passenger"><button type="button" data-d="-1" aria-label="Bajar"><svg viewBox="0 0 24 24"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button><span>22</span><button type="button" data-d="1" aria-label="Subir"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button></div>
+    <div class="volc">
+      <button class="chev" id="vDown" type="button" aria-label="Bajar volumen"><svg viewBox="0 0 24 24"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+      <span class="lvl"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg><span id="vol">–</span></span>
+      <button class="chev" id="vUp" type="button" aria-label="Subir volumen"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+    </div>
+  </nav>
+</div>
+
+<!-- Generic car (used until the user loads images of their own car) -->
+<template id="genericSide">
+  <svg class="generic" viewBox="0 0 400 190"><defs><linearGradient id="gp" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f5f6f8"/><stop offset=".5" stop-color="#c9ced6"/><stop offset="1" stop-color="#6e7682"/></linearGradient></defs>
+    <path fill="url(#gp)" d="M44,150 Q34,148 34,134 L35,120 Q36,109 49,106 L137,94 Q148,92 156,84 L185,60 Q191,55 202,54 L302,53 Q319,53 332,60 L359,76 Q367,81 368,92 L371,118 Q373,137 369,143 Q366,150 358,150 L343,150 A38,38 0 0,0 267,150 L149,150 A38,38 0 0,0 73,150 Z"/>
+    <path fill="#1f2633" d="M162,87 L190,64 Q195,60.5 203,60.5 L237,60.5 L237,87 Z M245,87 L245,60.5 L296,60 Q305,60 311,66 L321,76 L321,87 Z"/>
+    <circle cx="111" cy="148" r="30" fill="#17191e"/><circle cx="111" cy="148" r="19" fill="#b8bec9"/>
+    <circle cx="305" cy="148" r="30" fill="#17191e"/><circle cx="305" cy="148" r="19" fill="#b8bec9"/></svg>
+</template>
+<template id="genericRear">
+  <svg viewBox="0 0 120 150"><ellipse cx="60" cy="140" rx="54" ry="7" fill="#000" fill-opacity=".25"/><rect x="10" y="40" width="100" height="92" rx="18" fill="#c9ced6"/>
+    <rect x="22" y="14" width="76" height="40" rx="14" fill="#d6dae1"/><rect x="28" y="20" width="64" height="26" rx="8" fill="#1f2633"/>
+    <rect x="14" y="70" width="18" height="12" rx="4" fill="#d22c24"/><rect x="88" y="70" width="18" height="12" rx="4" fill="#d22c24"/>
+    <rect x="14" y="126" width="22" height="14" rx="4" fill="#17191e"/><rect x="84" y="126" width="22" height="14" rx="4" fill="#17191e"/></svg>
+</template>
+<template id="genericTop">
+  <svg class="generic" viewBox="0 0 120 220"><rect x="14" y="8" width="92" height="204" rx="40" fill="#d6dae1"/><rect x="24" y="58" width="72" height="34" rx="10" fill="#1f2633"/>
+    <rect x="22" y="96" width="76" height="80" rx="12" fill="#eef0f3"/><rect x="26" y="176" width="68" height="18" rx="8" fill="#1f2633"/></svg>
+</template>
+
+<script src="leaflet.js"></script>
+<script src="maplibre-gl.js"></script>
+<script>
+// ---------- Bridge (Android); a mock lets the page be previewed in a desktop browser ----------
+var Car = window.Car || (function () {
+  var t0 = Date.now(), vol = 9, playing = true, q = location.hash;
+  return {
+    state: function () {
+      var k = (Date.now() - t0) / 1000, night = q.indexOf('noche') >= 0, drive = q.indexOf('mapa') >= 0 || q.indexOf('fsd') >= 0;
+      return JSON.stringify({
+        night: night, lights: night, mapMode: 'map', mapsLabel: 'Waze', name: 'Conductor',
+        speed: drive ? Math.round(42 + 6 * Math.sin(k / 3)) : (q.indexOf('arranque') >= 0 && k > 3 ? 38 : 0), lat: 10.9878 + k * 0.0001, lon: -74.7889, bearing: q.indexOf('norte') >= 0 ? 0 : (35 + (q.indexOf('curva') >= 0 ? k * 12 : 0)) % 360, fix: true, addr: { home: '', work: '' },
+        nav: q.indexOf('waze') >= 0 ? { active: true, app: 'Waze', title: '300 m', text: 'Gira a la derecha hacia Calle 72', iconId: '' } : { active: false },
+        wx: { temp: 29, code: 2, day: !night, city: 'Barranquilla' },
+        oil: { configured: true, left: 842, warn: false },
+        pico: { show: q.indexOf('pico') >= 0, text: 'Pico y placa hasta 9:00 p. m.' },
+        media: { title: 'Vampire', artist: 'Olivia Rodrigo', src: 'YouTube Music', playing: playing, access: true, artId: '', pos: 61000 + (Date.now() - t0), dur: 219000 },
+        vol: vol, carV: q.indexOf('generico') >= 0 ? '' : 'demo'
+      });
+    },
+    art: function () { return ''; },
+    carImage: function (w) { return { base: 'car.png', lit: 'car_lit.png', top: 'car_top.png', toplit: 'car_top_lit.png' }[w] || ''; },
+    open: function () {}, action: function (a) {
+      if (a === 'playpause') playing = !playing;
+      if (a === 'volup') vol = Math.min(30, vol + 1);
+      if (a === 'voldown') vol = Math.max(0, vol - 1);
+    }
+  };
+})();
+
+var $ = function (id) { return document.getElementById(id); };
+var store = { get: function (k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+              set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+function toast(msg) { var t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('show'); }, 1800); }
+function act(a) { try { Car.action(a); } catch (e) {} setTimeout(tick, 150); }
+
+// ---------- Cards (same markup in both views) ----------
+var MUSIC = '<div class="top"><div class="art"><svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>' +
+  '<div class="meta"><div class="title">Nada sonando</div><div class="artist"><svg viewBox="0 0 24 24"><path d="M12 11c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 2c0-3.31-2.69-6-6-6s-6 2.69-6 6c0 2.22 1.21 4.15 3 5.19l1-1.74c-1.19-.7-2-1.97-2-3.45 0-2.21 1.79-4 4-4s4 1.79 4 4c0 1.48-.81 2.75-2 3.45l1 1.74c1.79-1.04 3-2.97 3-5.19zM12 3C6.48 3 2 7.48 2 13c0 3.7 2.01 6.92 4.99 8.65l1-1.73C5.61 18.53 4 15.96 4 13c0-4.42 3.58-8 8-8s8 3.58 8 8c0 2.96-1.61 5.53-4 6.92l1 1.73c2.99-1.73 5-4.95 5-8.65 0-5.52-4.48-10-10-10z"/></svg><span>Toca para abrir la música</span></div></div>' +
+  '<span class="src"></span></div><div class="bar"><i></i></div>' +
+  '<div class="ctl"><button type="button" data-a="prev" aria-label="Anterior"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>' +
+  '<button type="button" data-a="playpause" aria-label="Reproducir"><svg viewBox="0 0 24 24"><path class="pp" d="M8 5v14l11-7z"/></svg></button>' +
+  '<button type="button" data-a="next" aria-label="Siguiente"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>' +
+  '<button type="button" class="dim" data-a="eq" aria-label="Sonido"><svg viewBox="0 0 24 24"><path d="M7 3v5H5v2h6V8H9V3H7zm6 0v9h-2v2h6v-2h-2V3h-2zM5 12v2h2v7h2v-7h2v-2H5zm8 4v2h2v3h2v-3h2v-2h-6z"/></svg></button>' +
+  '<button type="button" class="dim" data-a="openmusic" aria-label="Abrir música"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></button></div>';
+var NAV = '<div class="search" data-n="search"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg><span>Navegar</span></div><hr>' +
+  '<div class="places"><button type="button" data-n="home"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Casa</button><i></i>' +
+  '<button type="button" data-n="work"><svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/></svg>Trabajo</button></div>';
+document.querySelectorAll('[data-music]').forEach(function (el) { el.innerHTML = MUSIC; });
+$('navHome').innerHTML = NAV;
+$('navDrive').innerHTML = NAV;
+document.querySelectorAll('[data-a]').forEach(function (b) { b.onclick = function () { act(b.dataset.a === 'eq' ? 'eq' : b.dataset.a); }; });
+document.querySelectorAll('.music .top').forEach(function (t) { t.onclick = function () { act('openmusic'); }; });
+document.querySelectorAll('[data-n]').forEach(function (b) {
+  b.onclick = function () {
+    var n = b.dataset.n;
+    if (n === 'search') { $('q').focus(); return; }
+    goPlace(n);
+  };
+});
+
+// ---------- Views ----------
+var view = 'home', manualUntil = 0;
+function showView(v, auto) {
+  if (v === view) return;
+  view = v;
+  if (!auto) manualUntil = Date.now() + 20000; // respect the user's choice for 20 s
+  var full = v === 'map';
+  $('screen').classList.toggle('mapfull', full);
+  $('expPath').setAttribute('d', full ? 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z' : 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z');
+  if (!full) { $('home').classList.toggle('off', v !== 'home'); $('drive').classList.toggle('off', v !== 'drive'); leftView = v; }
+  ensureMap();
+  setTimeout(function () { if (map) map.invalidateSize(); if (ml) ml.resize(); }, 480);
+}
+var leftView = 'home';
+$('toHome').onclick = function () { showView(view === 'map' ? leftView : 'map'); };
+
+$('carTop').onclick = function () { showView('home'); };
+
+// ---------- Simulated controls ----------
+var LOCK_CLOSED = 'M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z';
+var LOCK_OPEN = 'M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm6-9h-1V6a5 5 0 0 0-10 0h2a3 3 0 0 1 6 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2z';
+var locked = store.get('locked', '0') === '1';
+function drawLock() { $('lockPath').setAttribute('d', locked ? LOCK_CLOSED : LOCK_OPEN); $('lockPin').setAttribute('d', locked ? LOCK_CLOSED : LOCK_OPEN); }
+$('lockBtn').onclick = function () { locked = !locked; store.set('locked', locked ? '1' : '0'); drawLock(); toast(locked ? 'Seguro puesto (simulado)' : 'Seguro quitado (simulado)'); };
+drawLock();
+document.querySelectorAll('[data-sim]').forEach(function (c) { c.onclick = function (e) { e.stopPropagation(); toast(c.dataset.sim + ': función simulada'); }; });
+document.querySelectorAll('[data-temp]').forEach(function (t) {
+  var key = 'temp_' + t.dataset.temp, span = t.querySelector('span');
+  var v = parseFloat(store.get(key, '22'));
+  span.textContent = v;
+  t.querySelectorAll('button').forEach(function (b) {
+    b.onclick = function () { v = Math.max(16, Math.min(30, v + parseFloat(b.dataset.d))); span.textContent = v; store.set(key, v); };
+  });
+});
+
+// ---------- Map ----------
+// 1st choice: MapLibre GL with OpenFreeMap vector tiles (free, no key): clean, rotates with the car and tilts
+// in 3D while driving, like Tesla / Waze. Fallback: Leaflet with Esri's light-gray canvas tiles.
+var map = null, ml = null, mlReady = false, mlMarker = null, tiles = null, marker = null, follow = true, lastPos = null, mapMode = 'map';
+var ARROW = '<svg viewBox="0 0 48 48" width="44" height="44"><circle cx="24" cy="24" r="20" fill="#3e6ae1" fill-opacity=".18"/><path d="M24 8 34 36 24 30 14 36z" fill="#3e6ae1" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg>';
+// The marker on the map is the car seen from above (same picture as the side panel), lights on at night.
+var carMarkSrc = { off: '', on: '' };
+// Tesla-style position pointer (red arrow with a white border) instead of the car picture
+var TESLA_PTR = '<span class="tptr"><svg viewBox="0 0 48 48" width="40" height="40"><circle cx="24" cy="26" r="17" fill="#e82127" fill-opacity=".14"/>' +
+  '<path d="M24 5 38.5 40 24 32.5 9.5 40z" fill="#e82127" stroke="#fff" stroke-width="3.2" stroke-linejoin="round"/></svg></span>';
+function carMarkHtml() {
+  return TESLA_PTR;
+  return '<span class="carmark"><img alt="" src="' + (litNow && carMarkSrc.on ? carMarkSrc.on : carMarkSrc.off) + '"></span>';
+}
+var litNow = false;
+function refreshCarMark() {
+  var html = carMarkHtml();
+  if (mlMarker) mlMarker.getElement().innerHTML = html;
+  var a = document.getElementById('arrow'); if (a) a.innerHTML = html;
+}
+// Day: "Liberty" (colours, POI icons, 3D buildings, close to the Tesla / Google look). Night: "Positron" darkened.
+function styleUrl(n) { return 'https://tiles.openfreemap.org/styles/' + (n ? 'positron' : 'liberty'); }
+var mlStyleNight = null;
+function setMapTheme(n) {
+  if (!ml || !mlReady || mlStyleNight === n) return;
+  mlStyleNight = n; ml.setStyle(styleUrl(n));
+}
+function ensureMap() {
+  if (map || ml || mapMode === 'app') return;
+  var ok = false;
+  try { ok = !!window.maplibregl && (!maplibregl.supported || maplibregl.supported()); } catch (e) { ok = false; }
+  if (!ok) { leafletMap(); return; }
+  try {
+    mlStyleNight = document.documentElement.dataset.theme === 'dark';
+    ml = new maplibregl.Map({ container: 'map', style: styleUrl(mlStyleNight),
+      center: [-74.0817, 4.6097], zoom: 15, attributionControl: { compact: true }, maxPitch: 60 });
+    var timer = setTimeout(function () { if (!mlReady) leafletMap(); }, 12000);
+    ml.on('load', function () { mlReady = true; clearTimeout(timer); $('mapMsg').hidden = true; if (sat) applySat(); if (nav.route) drawRoute(); });
+    ml.on('error', function () { if (!mlReady) { clearTimeout(timer); leafletMap(); } });
+    ml.on('style.load', function () { if (!mlReady) return; if (sat) applySat(); if (nav.route) drawRoute(); world.at = 0; });
+    ml.on('dragstart', function () { follow = false; dragAt = Date.now(); $('recenter').classList.remove('follow'); });
+    var el = document.createElement('div'); el.innerHTML = carMarkHtml();
+    mlMarker = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([-74.0817, 4.6097]);
+  } catch (e) { leafletMap(); }
+}
+function leafletMap() {
+  if (ml) { try { ml.remove(); } catch (e) {} ml = null; mlReady = false; }
+  if (map || !window.L) { if (!window.L) $('mapMsg').hidden = false; return; }
+  $('map').innerHTML = '';
+  map = L.map('map', { zoomControl: false, attributionControl: true }).setView([4.6097, -74.0817], 15);
+  map.attributionControl.setPrefix(false);
+  map.on('dragstart', function () { follow = false; dragAt = Date.now(); $('recenter').classList.remove('follow'); });
+  if (nav.route) setTimeout(drawRoute, 0);
+  if (sat) setTimeout(applySat, 0);
+  marker = L.marker([4.6097, -74.0817], { icon: L.divIcon({ className: '', html: '<div id="arrow">' + carMarkHtml() + '</div>', iconSize: [44, 48], iconAnchor: [22, 24] }), interactive: false });
+  var base = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_';
+  var loaded = 0;
+  tiles = L.tileLayer(base + 'Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, maxNativeZoom: 16, attribution: 'Tiles © Esri' });
+  tiles.on('tileload', function () { loaded++; $('mapMsg').hidden = true; });
+  tiles.on('tileerror', function () { if (!loaded) $('mapMsg').hidden = false; });
+  tiles.addTo(map);
+  L.tileLayer(base + 'Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, maxNativeZoom: 16 }).addTo(map);
+}
+function camPadding() {
+  var h = $('map').clientHeight || 600;
+  return { top: Math.round(h * 0.38), bottom: 0, left: 0, right: 0 };
+}
+var dragAt = 0;
+function updateMap(s) {
+  if (!s.fix) return;
+  var sp = Math.max(0, s.speed || 0), moving = sp >= 8 || !!nav.route;
+  // While driving, the map goes back to following the car 12 s after the user moved it.
+  if (!follow && sp >= 8 && dragAt && Date.now() - dragAt > 12000) { follow = true; $('recenter').classList.add('follow'); }
+  if (ml && mlReady) {
+    var ll = [s.lon, s.lat];
+    if (!lastPos) { mlMarker.addTo(ml); ml.jumpTo({ center: ll, zoom: 16 }); }
+    mlMarker.setLngLat(ll).setRotation(s.bearing || 0);
+    if (follow) {
+      // Tesla "heading up": the map turns with the car and tilts in 3D; the car sits in the lower part of the map.
+      if (moving) ml.easeTo({ center: ll, bearing: sp >= 3 ? (s.bearing || 0) : ml.getBearing(), pitch: 50, zoom: sp > 70 ? 15.6 : 16.6,
+        padding: camPadding(), duration: 950 });
+      else ml.easeTo({ center: ll, pitch: 0, zoom: Math.max(ml.getZoom(), 15.5), padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 950 });
+    }
+    lastPos = ll;
+  } else if (map) {
+    var p = [s.lat, s.lon];
+    if (!lastPos) { marker.addTo(map); map.setView(p, 16, { animate: false }); }
+    marker.setLatLng(p);
+    var a = document.getElementById('arrow'); if (a) a.style.transform = 'rotate(' + (s.bearing || 0) + 'deg)';
+    if (follow) map.panTo(p, { animate: true, duration: 0.8 });
+    lastPos = p;
+  }
+}
+$('recenter').onclick = function () {
+  follow = true; this.classList.add('follow');
+  if (ml && lastPos) ml.easeTo({ center: lastPos, zoom: Math.max(ml.getZoom(), 16), padding: nav.route ? camPadding() : { top: 0, bottom: 0, left: 0, right: 0 } });
+  else if (map && lastPos) map.setView(lastPos, Math.max(map.getZoom(), 16));
+};
+$('zin').onclick = function () { if (ml) ml.zoomIn(); else if (map) map.zoomIn(); };
+$('zout').onclick = function () { if (ml) ml.zoomOut(); else if (map) map.zoomOut(); };
+$('appGo').onclick = function () { Car.open('app_maps'); };
+$('appChange').onclick = function () { act('pick:app_maps'); };
+
+// ---------- Car images ----------
+var carV = null;
+function setCar(holder, baseKey, litKey, tpl) {
+  var base = carV ? Car.carImage(baseKey) : '', lit = carV ? Car.carImage(litKey) : '';
+  if (!base) { holder.innerHTML = $(tpl).innerHTML; return ''; }
+  holder.innerHTML = '<img class="base' + (lit ? ' swap' : '') + '" alt="" src="' + base + '">' + (lit ? '<img class="lit has" alt="" src="' + lit + '">' : '');
+  return base;
+}
+
+// ---------- 360° car (personal build ships 36 frames in car/spin/) ----------
+var SPIN_N = 36, spin = null, frame = 0, lit = false;
+(function probeSpin() {
+  var t = new Image();
+  t.onload = function () {
+    spin = { off: [], on: [] };
+    for (var i = 0; i < SPIN_N; i++) {
+      var a = new Image(), b = new Image(), n = String(i).padStart(2, '0');
+      a.src = 'car/spin/s' + n + '_0.webp'; b.src = 'car/spin/s' + n + '_1.webp';
+      spin.off.push(a); spin.on.push(b);
+    }
+    var st = $('stage'); st.classList.add('spin'); st.style.aspectRatio = '553 / 379';
+    $('carHome').innerHTML = '<img id="spinImg" alt="Tu carro" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain">';
+    $('mirror').innerHTML = '<img id="spinMirror" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain">';
+    var hint = document.createElement('div'); hint.className = 'spinhint'; hint.id = 'spinHint'; hint.textContent = 'Desliza para girar el carro';
+    st.appendChild(hint); setTimeout(function () { hint.style.opacity = 0; }, 6000);
+    showFrame(0); bindSpin();
+  };
+  t.src = 'car/spin/s00_0.webp';
+})();
+function showFrame(i) {
+  if (!spin) return;
+  frame = ((Math.round(i) % SPIN_N) + SPIN_N) % SPIN_N;
+  var src = (lit ? spin.on : spin.off)[frame].src;
+  var a = $('spinImg'), m = $('spinMirror');
+  if (a && a.src !== src) a.src = src;
+  if (m && m.src !== src) m.src = src;
+  $('stage').classList.toggle('turned', frame !== 0);
+}
+function bindSpin() {
+  var st = $('stage'), down = false, x0 = 0, f0 = 0, lastX = 0, lastT = 0, vel = 0, idle = null, raf = null;
+  function goHome() {
+    cancelAnimationFrame(raf);
+    (function step() {
+      var d = frame <= SPIN_N / 2 ? -1 : 1;
+      if (frame === 0) return;
+      showFrame(frame + d);
+      raf = setTimeout(step, 45);
+    })();
+  }
+  st.addEventListener('pointerdown', function (e) {
+    if (e.target.closest('.callout')) return;
+    down = true; x0 = lastX = e.clientX; f0 = frame; lastT = performance.now(); vel = 0;
+    clearTimeout(idle); clearTimeout(raf); cancelAnimationFrame(raf);
+    try { st.setPointerCapture(e.pointerId); } catch (err) {}
+    var h = $('spinHint'); if (h) h.style.opacity = 0;
+  });
+  st.addEventListener('pointermove', function (e) {
+    if (!down) return;
+    var now = performance.now();
+    showFrame(f0 - (e.clientX - x0) / 14);
+    vel = (e.clientX - lastX) / Math.max(1, now - lastT); lastX = e.clientX; lastT = now;
+  });
+  function up() {
+    if (!down) return; down = false;
+    var v = -vel * 1000 / 14; // frames per second
+    var pos = frame;
+    (function coast() {
+      if (Math.abs(v) < 2) { idle = setTimeout(goHome, 8000); return; }
+      pos += v / 60; v *= 0.93; showFrame(pos);
+      raf = requestAnimationFrame(coast);
+    })();
+  }
+  st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
+}
+
+// ---------- Road marks move with the speed ----------
+var roadOff = 0, roadSpeed = 0, roadT = performance.now();
+(function roadLoop(t) {
+  var dt = Math.min(0.1, (t - roadT) / 1000); roadT = t;
+  roadOff = (roadOff + roadSpeed * 3.2 * dt) % 56;
+  var r = $('road'); if (r) r.style.setProperty('--off', roadOff.toFixed(1) + 'px');
+  requestAnimationFrame(roadLoop);
+})(performance.now());
+
+// ---------- Car seen from behind (driving view) ----------
+(function rearCar() {
+  var t = new Image();
+  t.onload = function () {
+    var lit = new Image(); lit.src = 'car/car_rear_lit.png';
+    $('carRear').innerHTML = '<img class="base swap" alt="" src="car/car_rear.png"><img class="lit" alt="" src="car/car_rear_lit.png">';
+  };
+  t.onerror = function () { $('carRear').innerHTML = $('genericRear').innerHTML; };
+  t.src = 'car/car_rear.png';
+})();
+
+// ---------- Trip: distance and time since the car started moving ----------
+var trip = { km: 0, start: 0, last: null, parkedAt: 0 };
+try { var saved = JSON.parse(store.get('trip', 'null')); if (saved) trip = saved; } catch (e) {}
+function hav(a, b) {
+  var R = 6371, dLat = (b[0] - a[0]) * Math.PI / 180, dLon = (b[1] - a[1]) * Math.PI / 180;
+  var x = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function updateTrip(s, sp) {
+  if (!s.fix) return;
+  var now = Date.now(), p = [s.lat, s.lon];
+  if (sp >= 3) {
+    if (!trip.start || (trip.parkedAt && now - trip.parkedAt > 10 * 60000)) { trip = { km: 0, start: now, last: p, parkedAt: 0 }; }
+    if (trip.last) { var d = hav(trip.last, p); if (d < 0.2) trip.km += d; }
+    trip.last = p; trip.parkedAt = 0;
+  } else if (trip.start && !trip.parkedAt) trip.parkedAt = now;
+  if (trip.start) {
+    var mins = Math.round(((trip.parkedAt || now) - trip.start) / 60000);
+    $('dtrip').textContent = $('trip').textContent = trip.km.toFixed(1).replace('.', ',') + ' km · ' + (mins >= 60 ? Math.floor(mins / 60) + ' h ' + (mins % 60) + ' min' : mins + ' min');
+  }
+  if (now % 10000 < 1100) store.set('trip', JSON.stringify(trip));
+}
+
+// ---------- Speed limit from OpenStreetMap (free Overpass API), only while moving ----------
+var limit = { v: 0, at: 0, pos: null, busy: false };
+function updateLimit(s, sp) {
+  var box = $('speedbox');
+  box.classList.toggle('over', !!limit.v && sp > limit.v + 5);
+  $('dsp').classList.toggle('over', !!limit.v && sp > limit.v + 5);
+  $('limit').hidden = !limit.v || Date.now() - limit.at > 5 * 60000;
+  $('dlimit').hidden = $('limit').hidden;
+  if (!s.fix || sp < 5 || limit.busy || !navigator.onLine) return;
+  var p = [s.lat, s.lon];
+  if (limit.pos && Date.now() - limit.at < 20000 && hav(limit.pos, p) < 0.15) return;
+  limit.busy = true;
+  var q = '[out:json][timeout:8];way(around:25,' + s.lat.toFixed(5) + ',' + s.lon.toFixed(5) + ')[highway][maxspeed];out tags 3;';
+  var ctrl = window.AbortController ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 9000);
+  fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q), ctrl ? { signal: ctrl.signal } : {})
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      var v = 0;
+      (j.elements || []).some(function (e) { var m = /(\d+)/.exec((e.tags || {}).maxspeed || ''); if (m) { v = +m[1]; return true; } return false; });
+      limit.v = v; limit.at = Date.now(); limit.pos = p;
+      if (v) { $('limitN').textContent = v; $('dlimitN').textContent = v; }
+    })
+    .catch(function () { limit.at = Date.now(); limit.pos = p; })
+    .then(function () { clearTimeout(timer); limit.busy = false; });
+}
+
+// ---------- Car pictures for the drive view and the map marker ----------
+// Camera of the chase picture (render of the 3D model): 8 m high, 10 m behind the rear bumper, looking level.
+// wFrac: share of the picture width taken by 1.6 m at the bumper; groundFrac: height of the bumper on the road.
+// Standard crop shared with the car-package generator (docs/generador): 2.3 m wide, 3.6 m above and 0.15 m below the bumper.
+var CHASE_META = { wFrac: 1.6 / 2.3, groundFrac: 3.6 / 3.75, camH: 8, zCar: 10 }, CHASE = null;
+function carPics() {
+  var t = new Image();
+  t.onload = function () { carMarkSrc = { off: 'car/car_top.png', on: 'car/car_top_lit.png' }; refreshCarMark(); };
+  t.onerror = function () {
+    var b = Car.carImage ? Car.carImage('top') : '';
+    if (b) { carMarkSrc = { off: b, on: Car.carImage('toplit') || '' }; refreshCarMark(); }
+  };
+  t.src = 'car/car_top.png';
+  // Preferred: the Spark rendered from behind and above (same camera as the road drawing, see CHASE)
+  var ch = new Image();
+  ch.onload = function () {
+    CHASE = CHASE_META; $('dcar').classList.add('chase');
+    $('dcar').innerHTML = '<img class="base swap" alt="" src="car/car_chase.png"><img class="lit" alt="" src="car/car_chase_lit.png">';
+  };
+  ch.onerror = function () {
+    // a car package imported in Ajustes (made with the generator)
+    var cb = Car.carImage ? Car.carImage('chase') : '';
+    if (cb) {
+      CHASE = CHASE_META; $('dcar').classList.add('chase');
+      $('dcar').innerHTML = '<img class="base swap" alt="" src="' + cb + '"><img class="lit" alt="" src="' + (Car.carImage('chaselit') || cb) + '">';
+      return;
+    }
+    var r = new Image();
+    r.onload = function () { $('dcar').innerHTML = '<img class="base swap" alt="" src="car/car_rear.png"><img class="lit" alt="" src="car/car_rear_lit.png">'; };
+    r.onerror = function () { $('dcar').innerHTML = $('genericRear').innerHTML; };
+    r.src = 'car/car_rear.png';
+  };
+  ch.src = 'car/car_chase.png';
+}
+carPics();
+
+// ---------- Real road shape for the drive view (Tesla-style) ----------
+// The streets around the car come from the same vector map tiles shown on the right (OpenStreetMap data).
+// The car is snapped to its street (map matching), moves smoothly between GPS fixes (dead reckoning),
+// and the streets, intersections, lane marks and the blue route are drawn in perspective behind it.
+var ROADW = { motorway: 15, trunk: 13, primary: 11, secondary: 10, tertiary: 8.5, minor: 7, service: 4.5, raceway: 8, busway: 7 };
+var world = { roads: [], at: 0, lat0: 0, lon0: 0, kx: 1, ky: 110540, route: null, routeKey: null };
+var pose = { ok: false, fixT: 0, fe: 0, fn: 0, fh: 0, v: 0, e: 0, n: 0, h: 0, off: 1.8, matchT: 0, te: 0, tn: 0, th: 0, toff: 1.8 };
+function toLocal(lon, lat) { return [(lon - world.lon0) * world.kx, (lat - world.lat0) * world.ky]; }
+function setOrigin(lat, lon) {
+  if (typeof pois !== 'undefined') { pois.list = []; pois.e = pois.n = 1e9; pois.at = 0; }
+  world.lat0 = lat; world.lon0 = lon; world.kx = 111320 * Math.cos(lat * Math.PI / 180);
+  world.roads = []; world.route = null; world.routeKey = null; pose.ok = false;
+}
+function vectorSource() {
+  try { var ss = ml.getStyle().sources; for (var k in ss) if (ss[k].type === 'vector') return k; } catch (e) {}
+  return null;
+}
+function loadRoads() {
+  if (!pose.ok) return;
+  var src = ml && mlReady ? vectorSource() : null;
+  if (!src) { roadsOverpass(); return; }
+  var feats; try { feats = ml.querySourceFeatures(src, { sourceLayer: 'transportation' }); } catch (e) { feats = []; }
+  var out = [], seen = {}, R = 450;
+  feats.forEach(function (f) {
+    var p = f.properties || {}, w = ROADW[p['class']];
+    if (!w || p.brunnel === 'tunnel' || (p['class'] === 'service' && p.service === 'parking_aisle')) return;
+    var g = f.geometry, lines = g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : [];
+    if (p.ramp) w = Math.min(w, 7);
+    lines.forEach(function (ln) {
+      if (ln.length < 2) return;
+      var key = p['class'] + ln[0][0].toFixed(6) + ln[0][1].toFixed(6) + ln.length;
+      if (seen[key]) return; seen[key] = 1;
+      var pts = [], near = false;
+      for (var i = 0; i < ln.length; i++) {
+        var q = toLocal(ln[i][0], ln[i][1]); pts.push(q);
+        if (Math.abs(q[0] - pose.e) < R && Math.abs(q[1] - pose.n) < R) near = true;
+      }
+      if (near) out.push({ w: w, pts: densify(pts, 15), oneway: p.oneway === 1 || p.oneway === '1' || p['class'] === 'motorway', cls: p['class'] });
+    });
+  });
+  if (out.length) { world.roads = out; world.at = Date.now(); world.src = 'mapa'; }
+  else roadsOverpass();
+}
+// Fallback: the streets straight from OpenStreetMap (Overpass), with the number of lanes when it is mapped
+var ovp = { at: 0, e: 1e9, n: 1e9, busy: false };
+var HW = { motorway: 'motorway', trunk: 'trunk', primary: 'primary', secondary: 'secondary', tertiary: 'tertiary', unclassified: 'minor',
+  residential: 'minor', living_street: 'minor', service: 'service', motorway_link: 'ramp', trunk_link: 'ramp', primary_link: 'ramp', secondary_link: 'ramp', tertiary_link: 'ramp' };
+function roadsOverpass() {
+  if (!pose.ok || ovp.busy || Date.now() - ovp.at < 20000) return;
+  if (world.roads.length && Math.hypot(pose.e - ovp.e, pose.n - ovp.n) < 250) return;
+  ovp.busy = true; ovp.at = Date.now(); ovp.e = pose.e; ovp.n = pose.n;
+  var lat = world.lat0 + pose.n / world.ky, lon = world.lon0 + pose.e / world.kx;
+  var q = '[out:json][timeout:20];way(around:450,' + lat.toFixed(6) + ',' + lon.toFixed(6) + ')[highway~"^(' + Object.keys(HW).join('|') + ')$"];out geom;';
+  fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (j) {
+    var out = [];
+    (j.elements || []).forEach(function (w) {
+      if (!w.geometry || w.geometry.length < 2) return;
+      var t = w.tags || {}, cls = HW[t.highway], lanes = parseInt(t.lanes, 10);
+      var wd = cls === 'ramp' ? 7 : ROADW[cls] || 7;
+      if (lanes > 0) wd = Math.max(4, Math.min(20, lanes * 3.3 + 1));
+      var pts = w.geometry.map(function (g) { return toLocal(g.lon, g.lat); });
+      if (t.oneway === '-1') pts.reverse();
+      out.push({ w: wd, oneway: t.oneway === 'yes' || t.oneway === '-1' || t.oneway === '1' || t.highway === 'motorway', pts: densify(pts, 15), cls: cls });
+    });
+    if (out.length) { world.roads = out; world.at = Date.now(); world.src = 'osm'; }
+  }).catch(function () {}).then(function () { ovp.busy = false; });
+}
+// Long straight segments are split so culling and perspective work piece by piece
+function densify(pts, step) {
+  var out = [pts[0]];
+  for (var i = 1; i < pts.length; i++) {
+    var a = pts[i - 1], b = pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.ceil(l / step);
+    for (var j = 1; j <= k; j++) out.push([a[0] + (b[0] - a[0]) * j / k, a[1] + (b[1] - a[1]) * j / k]);
+  }
+  return out;
+}
+function routeLocal() {
+  if (!nav.route) { world.route = null; world.routeKey = null; return null; }
+  if (world.routeKey !== nav.route) { world.routeKey = nav.route; world.routeRaw = nav.route.map(function (c) { return toLocal(c[0], c[1]); }); world.route = densify(world.routeRaw, 15); }
+  return world.route;
+}
+// Traffic lights, stop signs and speed cameras (fotomultas) mapped in OpenStreetMap around the car
+var pois = { list: [], at: 0, e: 1e9, n: 1e9, busy: false, warned: {} };
+function loadPois() {
+  if (!pose.ok || pois.busy || Date.now() - pois.at < 30000 || Math.hypot(pose.e - pois.e, pose.n - pois.n) < 350) return;
+  pois.busy = true; pois.at = Date.now(); pois.e = pose.e; pois.n = pose.n;
+  var lat = world.lat0 + pose.n / world.ky, lon = world.lon0 + pose.e / world.kx;
+  var q = '[out:json][timeout:15];(node(around:800,' + lat.toFixed(6) + ',' + lon.toFixed(6) + ')[highway~"^(traffic_signals|stop|speed_camera)$"];' +
+    'node(around:800,' + lat.toFixed(6) + ',' + lon.toFixed(6) + ')["enforcement"~"maxspeed|traffic_signals"];);out;';
+  fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (j) {
+    pois.list = (j.elements || []).map(function (n) {
+      var t = n.tags || {}, type = t.highway === 'speed_camera' || t.enforcement ? 'cam' : t.highway === 'stop' ? 'stop' : 'light';
+      return { id: n.id, type: type, p: toLocal(n.lon, n.lat) };
+    });
+  }).catch(function () {}).then(function () { pois.busy = false; });
+}
+// Voice + toast before a speed camera that is ahead on the way
+function checkCams() {
+  if (!pose.ok || pose.v < 3) return;
+  var hr = pose.h * Math.PI / 180;
+  pois.list.forEach(function (c) {
+    if (c.type !== 'cam' || pois.warned[c.id]) return;
+    var de = c.p[0] - pose.e, dn = c.p[1] - pose.n, fwd = de * Math.sin(hr) + dn * Math.cos(hr), lat = de * Math.cos(hr) - dn * Math.sin(hr);
+    if (fwd > 30 && fwd < 450 && Math.abs(lat) < 35) {
+      pois.warned[c.id] = 1;
+      var m = Math.round(fwd / 50) * 50;
+      toast('📷 Cámara de fotomulta a ' + m + ' m');
+      say('Atención, cámara de fotomulta a ' + m + ' metros');
+    }
+  });
+}
+// GPS fix (1 per second)
+function poseFix(s, sp) {
+  if (!s.fix) return;
+  if (!world.lat0 || Math.abs(s.lat - world.lat0) > 0.02 || Math.abs(s.lon - world.lon0) > 0.02) setOrigin(s.lat, s.lon);
+  var q = toLocal(s.lon, s.lat);
+  pose.fe = q[0]; pose.fn = q[1]; pose.fixT = performance.now(); pose.v = sp / 3.6;
+  if (sp >= 4 && typeof s.bearing === 'number') pose.fh = s.bearing;
+  if (!pose.ok) { pose.ok = true; pose.e = pose.te = q[0]; pose.n = pose.tn = q[1]; pose.h = pose.th = pose.fh; }
+  if (Date.now() - world.at > 2500) loadRoads();
+  loadPois(); checkCams();
+}
+// Nearest point on a polyline (local metres): segment end index i, projected point, distance, metres from the start
+function segNearest(pts, e, n) {
+  var best = { d: 1e12, i: 1, e: pts[0][0], n: pts[0][1], t: 0 };
+  for (var i = 1; i < pts.length; i++) {
+    var a = pts[i - 1], b = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+    var t = l2 ? Math.max(0, Math.min(1, ((e - a[0]) * dx + (n - a[1]) * dy) / l2)) : 0;
+    var px = a[0] + t * dx, py = a[1] + t * dy, d = Math.hypot(e - px, n - py);
+    if (d < best.d) best = { d: d, i: i, e: px, n: py, t: t * Math.sqrt(l2) };
+  }
+  return best;
+}
+function angDiff(a, b) { return ((a - b + 540) % 360) - 180; }
+function nearestSeg(lines, e, n, h, maxD, maxA) {
+  var best = null;
+  lines.forEach(function (L) {
+    var pts = L.pts || L;
+    for (var i = 1; i < pts.length; i++) {
+      var a = pts[i - 1], b = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; if (!l2) continue;
+      var t = Math.max(0, Math.min(1, ((e - a[0]) * dx + (n - a[1]) * dy) / l2));
+      var px = a[0] + t * dx, py = a[1] + t * dy, d = Math.hypot(e - px, n - py);
+      if (d > maxD || (best && d >= best.d)) continue;
+      var hs = Math.atan2(dx, dy) * 180 / Math.PI, df = angDiff(hs, h);
+      if (!L.oneway && Math.abs(df) > 90) { hs = (hs + 180) % 360; df = angDiff(hs, h); }
+      if (Math.abs(df) > maxA) continue;
+      best = { d: d, e: px, n: py, h: hs, road: L.pts ? L : null };
+    }
+  });
+  return best;
+}
+// Predicted pose for this frame
+function poseStep(dt) {
+  if (!pose.ok) return;
+  var now = performance.now(), age = Math.min(1.5, (now - pose.fixT) / 1000), hr = pose.fh * Math.PI / 180;
+  var pe = pose.fe + Math.sin(hr) * pose.v * age, pn = pose.fn + Math.cos(hr) * pose.v * age;
+  if (now - pose.matchT > 100) { // map matching at 10 Hz
+    pose.matchT = now;
+    var m = null, rl = routeLocal();
+    if (rl) m = nearestSeg([{ pts: rl, oneway: true }], pe, pn, pose.fh, 22, 60);
+    var mr = nearestSeg(world.roads, pe, pn, pose.fh, 16, 55);
+    if (!m && mr) m = mr;
+    if (m) {
+      pose.te = m.e; pose.tn = m.n; if (pose.v > 0.5 || !pose.matched) pose.th = m.h;
+      var r = (mr && mr.road) || null;
+      pose.toff = r ? (r.oneway ? 0 : Math.min(r.w / 4, 1.9)) : 1.8; pose.matched = true;
+    } else { pose.te = pe; pose.tn = pn; pose.th = pose.fh; pose.toff = 0; pose.matched = false; }
+  } else if (!pose.matched) { pose.te = pe; pose.tn = pn; }
+  if (pose.matched && pose.v > 0.3) { // keep sliding along the street between matches
+    var th = pose.th * Math.PI / 180, adv = pose.v * dt; pose.te += Math.sin(th) * adv; pose.tn += Math.cos(th) * adv;
+  }
+  var k = 1 - Math.exp(-dt * 5), kh = 1 - Math.exp(-dt * 3.5);
+  if (Math.hypot(pose.te - pose.e, pose.tn - pose.n) > 60) { pose.e = pose.te; pose.n = pose.tn; }
+  pose.e += (pose.te - pose.e) * k; pose.n += (pose.tn - pose.n) * k;
+  pose.h = (pose.h + angDiff(pose.th, pose.h) * kh + 360) % 360;
+  pose.off += (pose.toff - pose.off) * k;
+  pose.travel = (pose.travel || 0) + pose.v * dt;
+}
+function clipNear(pts, near) { // Sutherland–Hodgman against z >= near; pts are [x, z]
+  var out = [];
+  for (var i = 0; i < pts.length; i++) {
+    var a = pts[i], b = pts[(i + 1) % pts.length], ina = a[1] >= near, inb = b[1] >= near;
+    if (ina) out.push(a);
+    if (ina !== inb) { var t = (near - a[1]) / (b[1] - a[1]); out.push([a[0] + t * (b[0] - a[0]), near]); }
+  }
+  return out;
+}
+function drawWorld(g, W, H, cam) {
+  var night = viz.night, P = cam.P, zCar = cam.zCar, near = 2.5, FAR = 200;
+  var hr = pose.h * Math.PI / 180, sh = Math.sin(hr), ch = Math.cos(hr), off = pose.off;
+  function C(p) { // local world -> camera [x right, z forward from camera]; pose is on the street centre and the car `off` m to its right
+    var de = p[0] - pose.e, dn = p[1] - pose.n;
+    return [de * ch - dn * sh - off, de * sh + dn * ch + zCar];
+  }
+  function poly(cs, fill) {
+    cs = clipNear(cs, near); if (cs.length < 3) return;
+    g.beginPath(); cs.forEach(function (c, i) { var s = P(c[0], c[1]); if (i) g.lineTo(s[0], s[1]); else g.moveTo(s[0], s[1]); });
+    g.closePath(); g.fillStyle = fill; g.fill();
+  }
+  function quad(a, b, w, ext, fill) { // band of width w from world a to b, extended at both ends
+    var dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy); if (!l) return;
+    var ux = dx / l, uy = dy / l, nx = uy * w / 2, ny = -ux * w / 2;
+    var a2 = [a[0] - ux * ext, a[1] - uy * ext], b2 = [b[0] + ux * ext, b[1] + uy * ext];
+    var cs = [C([a2[0] - nx, a2[1] - ny]), C([b2[0] - nx, b2[1] - ny]), C([b2[0] + nx, b2[1] + ny]), C([a2[0] + nx, a2[1] + ny])];
+    if (cs.every(function (c) { return c[1] < near || c[1] > FAR + 40; }) || cs.every(function (c) { return Math.abs(c[0]) > 160; })) return;
+    poly(cs, fill);
+  }
+  function inView(p) { var c = C(p); return c[1] > -20 && c[1] < FAR + 20 && Math.abs(c[0]) < 140; }
+  // 1) street surfaces (with intersections)
+  var roadFill = night ? '#1d1e21' : '#d5d8dd';
+  world.roads.forEach(function (r) {
+    for (var i = 1; i < r.pts.length; i++) {
+      if (!inView(r.pts[i - 1]) && !inView(r.pts[i])) continue;
+      quad(r.pts[i - 1], r.pts[i], r.w, r.w / 2, roadFill);
+    }
+  });
+  // 3) lane marks: dashed centre line on two-way streets, thin edge lines; anchored to the ground so they slide by
+  var mark = night ? 'rgba(255,255,255,.55)' : 'rgba(60,64,72,.45)', edge = night ? 'rgba(255,255,255,.18)' : 'rgba(60,64,72,.18)';
+  world.roads.forEach(function (r) {
+    var acc = 0;
+    for (var i = 1; i < r.pts.length; i++) {
+      var a = r.pts[i - 1], b = r.pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (!l || (!inView(a) && !inView(b))) { acc += l; continue; }
+      var ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l, nx = uy, ny = -ux;
+      [-1, 1].forEach(function (sd) { // edges
+        var o = r.w / 2 - 0.4;
+        quad([a[0] + nx * o * sd, a[1] + ny * o * sd], [b[0] + nx * o * sd, b[1] + ny * o * sd], 0.14, 0, edge);
+      });
+      if (!r.oneway && r.w >= 6.5) { // centre dashes: 3 m every 9 m
+        var t0 = (9 - (acc % 9)) % 9;
+        for (var t = t0; t < l; t += 9) {
+          var t1 = Math.min(l, t + 3);
+          quad([a[0] + ux * t, a[1] + uy * t], [a[0] + ux * t1, a[1] + uy * t1], 0.16, 0, mark);
+        }
+      }
+      acc += l;
+    }
+  });
+  if (viz.lights) beams(g, P, zCar, night, cam.camH);
+  // 3b) traffic lights, stop signs and speed cameras standing at the roadside
+  var hor = P(0, 1e7)[1];
+  function P3(x, z, h) { var q = P(x, z); return [q[0], hor + (q[1] - hor) * (cam.camH - h) / cam.camH]; }
+  pois.list.forEach(function (o) {
+    var c = C(o.p); if (c[1] < zCar + 2 || c[1] > 130 || Math.abs(c[0]) > 40) return;
+    var x = c[0] + (c[0] >= -off ? 3.2 : -3.2), z = c[1], base = P3(x, z, 0), top = P3(x, z, o.type === 'light' ? 4.2 : 2.6), k = Math.max(0.35, Math.min(1.6, 30 / (z - zCar + 8)));
+    var a = Math.max(0, Math.min(1, (130 - z) / 40));
+    g.globalAlpha = a; g.strokeStyle = night ? '#9a9da3' : '#6d7178'; g.lineWidth = 2.5 * k; g.beginPath(); g.moveTo(base[0], base[1]); g.lineTo(top[0], top[1]); g.stroke();
+    if (o.type === 'light') {
+      var w = 9 * k, h = 24 * k; g.fillStyle = '#202226'; g.fillRect(top[0] - w / 2, top[1] - h, w, h);
+      ['#ff3b30', '#ffcc00', '#34c759'].forEach(function (col, i) { g.fillStyle = col; g.globalAlpha = a * 0.55; g.beginPath(); g.arc(top[0], top[1] - h + (i + 0.5) * h / 3, 2.8 * k, 0, 7); g.fill(); });
+      g.globalAlpha = a;
+    } else if (o.type === 'stop') {
+      var r = 9 * k; g.fillStyle = '#d0021b'; g.beginPath();
+      for (var i = 0; i < 8; i++) { var an = Math.PI / 8 + i * Math.PI / 4; g.lineTo(top[0] + Math.cos(an) * r, top[1] - r + Math.sin(an) * r); }
+      g.closePath(); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.2 * k; g.stroke();
+    } else {
+      var r2 = 10 * k; g.fillStyle = '#1f6feb'; g.beginPath(); g.arc(top[0], top[1] - r2, r2, 0, 7); g.fill();
+      g.fillStyle = '#fff'; g.fillRect(top[0] - r2 * 0.55, top[1] - r2 * 1.35, r2 * 1.1, r2 * 0.7); g.beginPath(); g.arc(top[0], top[1] - r2, r2 * 0.28, 0, 7); g.fillStyle = '#1f6feb'; g.fill();
+    }
+    g.globalAlpha = 1;
+  });
+  // 4) route: blue lane under the car that follows the streets and turns into the next street, like Tesla
+  var rl = routeLocal();
+  if (rl) {
+    var sn = segNearest(rl, pose.e, pose.n);
+    var path = [[pose.e, pose.n]], run = Math.hypot(rl[sn.i][0] - pose.e, rl[sn.i][1] - pose.n);
+    for (var j = sn.i; j < rl.length && run < 240; j++) { if (j > sn.i) run += Math.hypot(rl[j][0] - rl[j - 1][0], rl[j][1] - rl[j - 1][1]); path.push(rl[j]); }
+    // shift to the right-hand lane (Colombia drives on the right)
+    var lane = path.map(function (p, k) {
+      var a = path[Math.max(0, k - 1)], b = path[Math.min(path.length - 1, k + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+      return [p[0] + dy / l * off, p[1] - dx / l * off];
+    });
+    lane[0] = [pose.e + Math.cos(hr) * off, pose.n - Math.sin(hr) * off];
+    for (var k2 = 1; k2 < lane.length; k2++) quad(lane[k2 - 1], lane[k2], 2.6, 0.4, 'rgba(62,106,225,.30)');
+    [-1.3, 1.3].forEach(function (o) {
+      var side = lane.map(function (p, k) {
+        var a = lane[Math.max(0, k - 1)], b = lane[Math.min(lane.length - 1, k + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+        return [p[0] + dy / l * o, p[1] - dx / l * o];
+      });
+      for (var k3 = 1; k3 < side.length; k3++) quad(side[k3 - 1], side[k3], 0.32, 0.17, 'rgba(62,106,225,.95)');
+    });
+    // white chevrons every 9 m pointing the way (they bend into the next street at the turn)
+    var acc = 0, nextAt = 6 - (pose.travel || 0) % 9; if (nextAt < 4) nextAt += 9; // only in front of the car
+    for (var k4 = 1; k4 < lane.length; k4++) {
+      var a4 = lane[k4 - 1], b4 = lane[k4], l4 = Math.hypot(b4[0] - a4[0], b4[1] - a4[1]); if (!l4) continue;
+      var ux = (b4[0] - a4[0]) / l4, uy = (b4[1] - a4[1]) / l4, nx = uy, ny = -ux;
+      while (nextAt <= acc + l4) {
+        var t = nextAt - acc, c0 = [a4[0] + ux * t, a4[1] + uy * t];
+        var pts = [[0, 0.9], [0.75, -0.2], [0.45, -0.2], [0, 0.4], [-0.45, -0.2], [-0.75, -0.2]].map(function (q) {
+          return C([c0[0] + nx * q[0] + ux * q[1], c0[1] + ny * q[0] + uy * q[1]]); });
+        poly(pts, night ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.85)');
+        nextAt += 9;
+      }
+      acc += l4;
+    }
+  } else if (pose.v > 1) { // no route: soft blue track straight ahead along the street
+    var hh = pose.h * Math.PI / 180, s0 = [pose.e + Math.cos(hh) * off, pose.n - Math.sin(hh) * off];
+    for (var z3 = 0; z3 < 45; z3 += 3) {
+      var p1 = [s0[0] + Math.sin(hh) * z3, s0[1] + Math.cos(hh) * z3], p2 = [s0[0] + Math.sin(hh) * (z3 + 3), s0[1] + Math.cos(hh) * (z3 + 3)];
+      quad(p1, p2, 2.2, 0, 'rgba(62,106,225,' + (0.28 * (1 - z3 / 45)).toFixed(3) + ')');
+    }
+  }
+}
+
+// ---------- Drive visualization: perspective road drawn on a canvas ----------
+var viz = { travelled: 0, curve: 0, curveTarget: 0, lastBearing: null, lastT: 0, speed: 0, lights: false, night: false, hasRoute: false };
+function updateDrive(s, sp) {
+  viz.speed = sp; viz.lights = !!s.lights; viz.night = !!s.night;
+  poseFix(s, sp);
+  $('dvias').textContent = !s.fix ? 'Sin señal GPS' : world.roads.length ? '' : 'Cargando las calles…';
+  // Road bends with the turning rate (change of GPS heading).
+  var now = Date.now();
+  if (s.fix && sp >= 8 && typeof s.bearing === 'number') {
+    if (viz.lastBearing !== null && viz.lastT) {
+      var d = ((s.bearing - viz.lastBearing + 540) % 360) - 180, dt = (now - viz.lastT) / 1000;
+      if (dt > 0 && dt < 5) viz.curveTarget = Math.max(-1, Math.min(1, (d / dt) / 25));
+    }
+    viz.lastBearing = s.bearing; viz.lastT = now;
+  } else viz.curveTarget = 0;
+  $('dsp').textContent = sp;
+  $('dsp').classList.toggle('s80', sp > 80 && sp <= 100); $('dsp').classList.toggle('s100', sp > 100);
+  $('speed').classList.toggle('s80', sp > 80 && sp <= 100); $('speed').classList.toggle('s100', sp > 100);
+  var d2 = new Date(); $('mtime').textContent = d2.getHours() + ':' + pad(d2.getMinutes());
+  $('mtemp').textContent = s.wx ? s.wx.temp + '°C' : '--°C';
+}
+(function vizLoop(t) {
+  var c = $('viz');
+  if (view === 'drive' && c && !(viz.lastFrame && t - viz.lastFrame < 30)) { // ~30 fps is enough and spares the radio's CPU
+    var dpr = Math.min(2, window.devicePixelRatio || 1), W = c.clientWidth, H = c.clientHeight;
+    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    var g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var dt = viz.lastFrame ? Math.min(0.1, (t - viz.lastFrame) / 1000) : 0; viz.lastFrame = t;
+    viz.travelled += viz.speed / 3.6 * dt;
+    viz.curve += (viz.curveTarget - viz.curve) * Math.min(1, dt * 1.5);
+    poseStep(dt);
+    drawRoad(g, W, H);
+  } else if (view !== 'drive') viz.lastFrame = 0;
+  requestAnimationFrame(vizLoop);
+})(0);
+function drawRoad(g, W, H) {
+  var night = viz.night, horizon = H * 0.22, cx = W / 2, laneW = 3.6, zCar = 14;
+  // Scale the road so the car picture sits on it: its width is ~1.6 m, its wheels touch the road.
+  var cr = $('dcar').getBoundingClientRect(), vr = $('viz').getBoundingClientRect();
+  var pxm = cr.width ? cr.width * 0.86 / 1.6 : 70, ground = cr.width ? cr.bottom - vr.top - cr.height * 0.05 : H * 0.7;
+  var camH = Math.max(0.5, (ground - horizon) / pxm), f = pxm * zCar;
+  if (CHASE && cr.width) { // Tesla-like view from above: same camera the car picture was rendered with
+    pxm = cr.width * CHASE.wFrac / 1.6; ground = cr.top - vr.top + cr.height * CHASE.groundFrac;
+    camH = CHASE.camH; zCar = CHASE.zCar; horizon = ground - camH * pxm; f = pxm * zCar;
+  }
+  var bg = g.createLinearGradient(0, 0, 0, H);
+  if (night) { bg.addColorStop(0, '#000'); bg.addColorStop(0.35, '#050506'); bg.addColorStop(1, '#141416'); }
+  else { bg.addColorStop(0, '#f4f5f7'); bg.addColorStop(0.35, '#eceef1'); bg.addColorStop(1, '#dfe2e6'); }
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  function P(x, z) { // world (x lateral m, z forward m from camera) -> screen
+    var bend = viz.curve * 0.012 * Math.max(0, z - zCar) * Math.max(0, z - zCar);
+    return [cx + (x + bend) * f / z, horizon + camH * f / z];
+  }
+  function fade(z) { return Math.max(0, Math.min(1, (80 - z) / 50)); }
+  if (pose.ok && world.roads.length) {
+    drawWorld(g, W, H, { P: function (x, z) { return [cx + x * f / z, horizon + camH * f / z]; }, zCar: zCar, camH: camH });
+    hazeTop(g, W, H, horizon, night);
+    return;
+  }
+  if (viz.lights) beams(g, function (x, z) { return [cx + x * f / z, horizon + camH * f / z]; }, zCar, night, camH);
+  // blue path ahead of the car (brighter when a route is active)
+  for (var z2 = zCar - 1.5; z2 < 60; z2 += 1) {
+    var w = 0.95, p1 = P(-w, z2), p2 = P(w, z2), p3 = P(w, z2 + 1), p4 = P(-w, z2 + 1);
+    var al = (viz.hasRoute ? 0.32 : 0.45) * Math.max(0, 1 - (z2 - zCar) / 50);
+    g.fillStyle = 'rgba(62,106,225,' + al.toFixed(3) + ')';
+    g.beginPath(); g.moveTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.lineTo(p3[0], p3[1]); g.lineTo(p4[0], p4[1]); g.closePath(); g.fill();
+  }
+  // With a route: the lane is outlined by two blue lines, like Tesla's Autopilot path.
+  if (viz.hasRoute) [-1.75, 1.75].forEach(function (x) {
+    g.beginPath();
+    for (var z5 = zCar - 1.5; z5 < 70; z5 += 1) { var q5 = P(x, z5); if (z5 === zCar - 1.5) g.moveTo(q5[0], q5[1]); else g.lineTo(q5[0], q5[1]); }
+    var gr = g.createLinearGradient(0, horizon, 0, H); gr.addColorStop(0, 'rgba(62,106,225,0)'); gr.addColorStop(0.25, 'rgba(62,106,225,.9)'); gr.addColorStop(1, 'rgba(62,106,225,1)');
+    g.strokeStyle = gr; g.lineWidth = 5; g.lineCap = 'round'; g.stroke();
+  });
+  // lane lines: solid road edges, dashed lane separators moving with the distance travelled
+  var lines = [-1.5, -0.5, 0.5, 1.5];
+  lines.forEach(function (k) {
+    var x = k * laneW, solid = Math.abs(k) === 1.5;
+    var col = night ? '255,255,255' : '40,44,52';
+    if (solid) {
+      g.beginPath();
+      for (var z3 = 3; z3 < 90; z3 += 2) { var q = P(x, z3); if (z3 === 3) g.moveTo(q[0], q[1]); else g.lineTo(q[0], q[1]); }
+      g.strokeStyle = 'rgba(' + col + ',' + (night ? 0.28 : 0.22) + ')'; g.lineWidth = 2; g.stroke();
+    } else {
+      var phase = viz.travelled % 9;
+      for (var z4 = 4 - phase; z4 < 90; z4 += 9) {
+        var za = Math.max(4, z4), zb = z4 + 3; if (zb <= 4) continue;
+        var u = P(x, za), v = P(x, zb), wpx = Math.min(5, Math.max(1, 0.15 * f / za));
+        g.strokeStyle = 'rgba(' + col + ',' + ((night ? 0.5 : 0.38) * fade(za)).toFixed(3) + ')';
+        g.lineWidth = wpx; g.beginPath(); g.moveTo(u[0], u[1]); g.lineTo(v[0], v[1]); g.stroke();
+      }
+    }
+  });
+  hazeTop(g, W, H, horizon, night);
+}
+// Headlights: two warm beams on the road in front of the car, plus the glow of the lamps beside the bonnet
+function beams(g, P, zCar, night, camH) {
+  // The headlamps sit at the front of the Spark (~3.5 m ahead of the rear bumper), 0.7 m above the road.
+  var zf = zCar + 3.5, L = 40, prev = g.globalCompositeOperation, hor = P(0, 1e7)[1];
+  function P3(x, z, h) { var q = P(x, z); return [q[0], hor + (q[1] - hor) * (camH - h) / camH]; }
+  g.globalCompositeOperation = night ? 'lighter' : 'source-over';
+  // light on the road: it only shows from in front of the bonnet, never under the car
+  var y0 = P(0, zf)[1], y1 = P(0, zf + L)[1];
+  [-0.65, 0.65].forEach(function (hx) {
+    var o = hx < 0 ? -1 : 1, pts = [[hx - 0.15, zf], [hx + 0.15, zf], [hx + (o > 0 ? 3.6 : 2.0), zf + L], [hx - (o > 0 ? 2.0 : 3.6), zf + L]];
+    var gr = g.createLinearGradient(0, y0, 0, y1);
+    gr.addColorStop(0, 'rgba(255,240,205,0)');
+    gr.addColorStop(0.12, night ? 'rgba(255,240,205,.55)' : 'rgba(255,236,190,.22)');
+    gr.addColorStop(0.5, night ? 'rgba(255,240,205,.22)' : 'rgba(255,236,190,.08)');
+    gr.addColorStop(1, 'rgba(255,240,205,0)');
+    g.beginPath(); pts.forEach(function (q, i) { var sc = P(q[0], q[1]); if (i) g.lineTo(sc[0], sc[1]); else g.moveTo(sc[0], sc[1]); }); g.closePath();
+    g.fillStyle = gr; g.fill();
+    // lamp halo at the real height of the headlamps: it peeks out at the front corners, beside the mirrors
+    var c = P3(hx * 1.15, zf, 0.75), r = 16;
+    var rg = g.createRadialGradient(c[0], c[1], 0, c[0], c[1], r * 2);
+    rg.addColorStop(0, night ? 'rgba(255,250,235,.9)' : 'rgba(255,250,235,.5)'); rg.addColorStop(0.4, 'rgba(255,240,205,.3)'); rg.addColorStop(1, 'rgba(255,240,205,0)');
+    g.fillStyle = rg; g.beginPath(); g.arc(c[0], c[1], r * 2, 0, Math.PI * 2); g.fill();
+  });
+  g.globalCompositeOperation = prev;
+}
+function hazeTop(g, W, H, horizon, night) {
+  if (horizon < 40) { // camera from above: the far road fades into the background
+    var fe = Math.max(60, horizon + (H - horizon) * 0.16), fg = g.createLinearGradient(0, 0, 0, fe), fc = night ? '0,0,0' : '236,238,241';
+    fg.addColorStop(0, 'rgba(' + fc + ',.95)'); fg.addColorStop(1, 'rgba(' + fc + ',0)');
+    g.fillStyle = fg; g.fillRect(0, 0, W, fe); return;
+  }
+  var hz = g.createLinearGradient(0, horizon - 6, 0, horizon + 34);
+  var hc = night ? '0,0,0' : '236,238,241';
+  hz.addColorStop(0, 'rgba(' + hc + ',1)'); hz.addColorStop(1, 'rgba(' + hc + ',0)');
+  g.fillStyle = hz; g.fillRect(0, 0, W, horizon + 34);
+}
+
+// ---------- Navigation (Tesla-style, inside the launcher): Photon search + OSRM route, both free ----------
+var nav = { route: null, cum: null, total: 0, dur: 0, steps: [], idx: 0, dest: null, label: '', offSince: 0, lastRoute: 0, busy: false,
+  said: {}, startSaid: false };
+var PIN = '<span class="destpin"><svg viewBox="0 0 30 40"><path d="M15 0C6.7 0 0 6.6 0 14.8 0 25.9 15 40 15 40s15-14.1 15-25.2C30 6.6 23.3 0 15 0z" fill="#e5322c"/><circle cx="15" cy="15" r="6" fill="#fff"/></svg></span>';
+var destMarker = null, lDest = null;
+function myPos() { return lastState && lastState.fix ? [lastState.lat, lastState.lon] : null; }
+function say(t) { try { if (Car.say) Car.say(t); } catch (e) {} }
+
+// --- search ---
+function photon(q) {
+  var p = myPos(), bias = p ? '&lat=' + p[0] + '&lon=' + p[1] : '';
+  return fetch('https://photon.komoot.io/api/?limit=7&q=' + encodeURIComponent(q) + bias)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      return (j.features || []).map(function (f) {
+        var pr = f.properties || {}, c = f.geometry.coordinates;
+        var street = [pr.street, pr.housenumber].filter(Boolean).join(' ');
+        var name = pr.name || street || pr.city || 'Lugar';
+        var sub = [name !== street ? street : '', pr.district || pr.locality, pr.city, pr.state].filter(Boolean).join(', ');
+        return { name: name, sub: sub, lon: c[0], lat: c[1] };
+      });
+    });
+}
+// Android's geocoder (Google data when the radio has Google services) through the bridge
+var geoCb = {}, geoN = 0;
+window.onGeo = function (id, json) { var f = geoCb[id]; delete geoCb[id]; if (f) { try { f(JSON.parse(json)); } catch (e) { f([]); } } };
+function androidGeo(q) {
+  return new Promise(function (res) {
+    var p = myPos(), id = 'g' + (++geoN);
+    geoCb[id] = res;
+    var ok = false; try { ok = !!(Car.geocode && Car.geocode(id, q, p ? p[0] : 0, p ? p[1] : 0)); } catch (e) {}
+    if (!ok) { delete geoCb[id]; res([]); return; }
+    setTimeout(function () { if (geoCb[id]) { delete geoCb[id]; res([]); } }, 7000);
+  });
+}
+function nominatim(q) {
+  var p = myPos(), vb = p ? '&viewbox=' + (p[1] - 0.3) + ',' + (p[0] + 0.3) + ',' + (p[1] + 0.3) + ',' + (p[0] - 0.3) : '';
+  return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=co&accept-language=es&q=' + encodeURIComponent(q) + vb)
+    .then(function (r) { return r.json(); })
+    .then(function (j) { return j.map(function (x) { var parts = (x.display_name || '').split(', ');
+      return { name: x.name || parts[0], sub: parts.slice(1, 4).join(', '), lat: +x.lat, lon: +x.lon, src: 'osm' }; }); })
+    .catch(function () { return []; });
+}
+// Colombian address: "Calle 72 # 46-30" = on Calle 72, 30 m from Carrera 46. The two streets are looked up in OpenStreetMap
+// and the crossing is the destination.
+var VIA = { calle: 'Calle', cl: 'Calle', cll: 'Calle', clle: 'Calle', carrera: 'Carrera', cra: 'Carrera', kr: 'Carrera', kra: 'Carrera', cr: 'Carrera', crr: 'Carrera', kar: 'Carrera',
+  diagonal: 'Diagonal', dg: 'Diagonal', diag: 'Diagonal', transversal: 'Transversal', tv: 'Transversal', tr: 'Transversal', trans: 'Transversal', tranv: 'Transversal',
+  avenida: 'Avenida', av: 'Avenida', ak: 'Avenida Carrera', ac: 'Avenida Calle', circular: 'Circular', cq: 'Circular' };
+function parseCol(q) {
+  var m = q.toLowerCase().replace(/[º°]/g, '').replace(/^\s*(av|avda|avenida)\.?\s+(?=(calle|cl|cll|carrera|cra|kr|kra|cr)\b)/, '').match(/^\s*(avenida calle|avenida carrera|[a-z]+)\.?\s*(\d+)\s*([a-z])?\s*(bis)?\s*(?:#|no\.?|n\.|numero|número|nro\.?)?\s*(\d+)\s*([a-z])?\s*(?:bis)?\s*[-–]\s*(\d+)/);
+  if (!m) return null;
+  var t = m[1] === 'avenida calle' ? 'Calle' : m[1] === 'avenida carrera' ? 'Carrera' : VIA[m[1]];
+  if (!t) return null;
+  if (t === 'Avenida Calle') t = 'Calle'; if (t === 'Avenida Carrera') t = 'Carrera';
+  var cross = (t === 'Calle' || t === 'Diagonal') ? 'Carrera|Transversal' : (t === 'Carrera' || t === 'Transversal') ? 'Calle|Diagonal' : 'Calle|Carrera|Diagonal|Transversal';
+  return { type: t, n1: m[2], l1: m[3] || '', n2: m[5], l2: m[6] || '', cross: cross, label: t + ' ' + m[2] + (m[3] || '').toUpperCase() + ' # ' + m[5] + (m[6] || '').toUpperCase() + '-' + m[7] };
+}
+function colAddr(q) {
+  var a = parseCol(q), p = myPos();
+  if (!a || !p) return Promise.resolve([]);
+  function rx(types, n, l) { return '^(Avenida )?(' + types + ') ' + n + (l ? ' ?' + l : '') + '( ?Bis)?( [A-Z].*)?$'; }
+  var Q = '[out:json][timeout:20];(way(around:25000,' + p[0] + ',' + p[1] + ')[highway][name~"' + rx(a.type, a.n1, a.l1) + '",i];)->.a;' +
+    '(way(around:25000,' + p[0] + ',' + p[1] + ')[highway][name~"' + rx(a.cross, a.n2, a.l2) + '",i];)->.b;.a out geom;.b out geom;';
+  return fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(Q)).then(function (r) { return r.json(); }).then(function (j) {
+    var re1 = new RegExp(rx(a.type, a.n1, a.l1), 'i'), A = [], B = [];
+    (j.elements || []).forEach(function (w) { (re1.test((w.tags || {}).name || '') ? A : B).push(w); });
+    var best = null;
+    A.forEach(function (wa) { B.forEach(function (wb) {
+      (wa.geometry || []).forEach(function (pa) { (wb.geometry || []).forEach(function (pb) {
+        var d = hav([pa.lat, pa.lon], [pb.lat, pb.lon]);
+        if (!best || d < best.d) best = { d: d, lat: (pa.lat + pb.lat) / 2, lon: (pa.lon + pb.lon) / 2, city: (wa.tags || {})['addr:city'] };
+      }); });
+    }); });
+    if (!best || best.d > 0.08) return [];
+    return [{ name: a.label, sub: 'Cruce de ' + a.type + ' ' + a.n1 + a.l1.toUpperCase() + ' con la ' + a.n2 + a.l2.toUpperCase(), lat: best.lat, lon: best.lon, src: 'col' }];
+  }).catch(function () { return []; });
+}
+function withTimeout(pr, ms) { return Promise.race([pr, new Promise(function (r) { setTimeout(function () { r([]); }, ms); })]); }
+// All the sources at once; the best one first (Google > Colombian address > OSM), duplicates removed
+function placeSearch(q) {
+  return Promise.all([withTimeout(androidGeo(q), 7000), withTimeout(colAddr(q), 9000), withTimeout(nominatim(q), 7000), withTimeout(photon(q).catch(function () { return []; }), 7000)])
+    .then(function (rs) {
+      var out = [];
+      [rs[0], rs[1], rs[2], rs[3]].forEach(function (list) { (list || []).forEach(function (it) {
+        if (!isFinite(it.lat) || !isFinite(it.lon)) return;
+        if (out.some(function (o) { return hav([o.lat, o.lon], [it.lat, it.lon]) < 0.06; })) return;
+        out.push(it);
+      }); });
+      return out.slice(0, 8);
+    });
+}
+function geocode(addr) {
+  var key = 'geo2:' + addr, c = store.get(key, '');
+  if (c) return Promise.resolve(JSON.parse(c));
+  return placeSearch(addr).then(function (r) {
+    if (!r.length) throw new Error('no encontrada');
+    var ll = [r[0].lon, r[0].lat]; store.set(key, JSON.stringify(ll)); return ll;
+  });
+}
+function recents() { try { return JSON.parse(store.get('recents', '[]')); } catch (e) { return []; } }
+function addRecent(pl) {
+  var r = recents().filter(function (x) { return x.name !== pl.name || Math.abs(x.lat - pl.lat) > 1e-4; });
+  r.unshift({ name: pl.name, sub: pl.sub || '', lat: pl.lat, lon: pl.lon }); store.set('recents', JSON.stringify(r.slice(0, 8)));
+}
+var PINICO = '<svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
+var listItems = [], placeMode = '';
+function showList(items, title, empty) {
+  listItems = items;
+  $('npTitle').textContent = title;
+  var p = myPos();
+  $('npList').innerHTML = items.length ? items.map(function (it, i) {
+    var d = p ? fmtDist(hav(p, [it.lat, it.lon])) : '';
+    return '<div class="row" data-i="' + i + '"><div style="min-width:0"><b>' + esc(it.name) + '</b><span>' + esc(it.sub || '') + '</span></div><i>' + PINICO + d + '</i></div>';
+  }).join('') : '<div class="empty">' + empty + '</div>';
+  $('npList').querySelectorAll('.row').forEach(function (r) {
+    r.onclick = function () { pick(listItems[+r.dataset.i]); };
+  });
+}
+function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function showRecents() {
+  placeMode = '';
+  showList(recents(), 'Recientes', 'Busca un lugar o una dirección. Los destinos aparecerán aquí.');
+}
+function pick(it) {
+  $('q').value = ''; $('q').blur(); $('qx').hidden = true;
+  if (placeMode) { // saving Casa / Trabajo
+    store.set('place_' + placeMode, JSON.stringify(it));
+    toast((placeMode === 'home' ? 'Casa' : 'Trabajo') + ' guardado');
+    var m = placeMode; placeMode = ''; showRecents();
+    routeToPlace(it, m === 'home' ? 'Casa' : 'Trabajo');
+    return;
+  }
+  routeToPlace(it, it.name);
+}
+var qTimer = null;
+$('q').addEventListener('input', function () {
+  var v = $('q').value.trim();
+  $('qx').hidden = !v && !placeMode;
+  clearTimeout(qTimer);
+  if (v.length < 3) { if (!placeMode) showRecents(); return; }
+  qTimer = setTimeout(function () {
+    showList([], 'Buscando…', 'Buscando “' + esc(v) + '”…');
+    placeSearch(v).then(function (r) { if ($('q').value.trim() === v) showList(r, 'Resultados', 'Sin resultados. Prueba como “Calle 72 # 46-30” o con el nombre del lugar.'); })
+      .catch(function () { showList([], 'Resultados', 'Sin internet: no se puede buscar'); });
+  }, 700);
+});
+$('q').addEventListener('focus', function () { $('navpanel').classList.remove('min'); });
+$('q').addEventListener('keydown', function (e) { if (e.key === 'Enter' && listItems.length && $('q').value.trim()) pick(listItems[0]); });
+$('qx').onclick = function () { $('q').value = ''; $('qx').hidden = true; $('q').blur(); showRecents(); };
+function goPlace(n) {
+  var saved = null; try { saved = JSON.parse(store.get('place_' + n, 'null')); } catch (e) {}
+  var label = n === 'home' ? 'Casa' : 'Trabajo';
+  if (saved) { routeToPlace(saved, label); return; }
+  var addr = lastState && lastState.addr ? lastState.addr[n] : ''; // typed in Ajustes
+  if (addr) {
+    geocode(addr).then(function (ll) { var it = { name: label, sub: addr, lon: ll[0], lat: ll[1] }; store.set('place_' + n, JSON.stringify(it)); routeToPlace(it, label); })
+      .catch(function () { toast('No encontré la dirección de ' + label); });
+    return;
+  }
+  setPlace(n);
+}
+function setPlace(n) {
+  placeMode = n;
+  $('navpanel').classList.remove('min');
+  $('q').value = ''; $('qx').hidden = false;
+  $('q').placeholder = n === 'home' ? 'Dirección de tu casa' : 'Dirección de tu trabajo';
+  showList([], n === 'home' ? 'Guardar Casa' : 'Guardar Trabajo', 'Escribe la dirección y elígela de la lista.');
+  $('q').focus();
+}
+longPress($('pHome'), function () { goPlace('home'); }, function () { setPlace('home'); });
+longPress($('pWork'), function () { goPlace('work'); }, function () { setPlace('work'); });
+
+// --- route ---
+function routeToPlace(it, label) {
+  $('q').placeholder = 'Navegar';
+  if (!myPos()) { toast('Esperando señal GPS para calcular la ruta'); return; }
+  nav.label = label || it.name; nav.dest = [it.lon, it.lat]; nav.place = it;
+  addRecent(it);
+  nav.said = {}; nav.startSaid = false;
+  fetchRoute().then(function () { if (nav.route) { if (view === 'home') showView('drive'); overview(true); } });
+}
+function routeTo(addr, label) { geocode(addr).then(function (ll) { routeToPlace({ name: label, sub: addr, lon: ll[0], lat: ll[1] }, label); }); }
+function fetchRoute() {
+  var p = myPos();
+  if (!nav.dest || !p || nav.busy) return Promise.resolve();
+  nav.busy = true; nav.lastRoute = Date.now();
+  var url = 'https://router.project-osrm.org/route/v1/driving/' + p[1] + ',' + p[0] + ';' + nav.dest[0] + ',' + nav.dest[1] +
+    '?overview=full&geometries=geojson&steps=true';
+  return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+    var rt = j.routes && j.routes[0]; if (!rt) throw new Error('sin ruta');
+    setRoute(rt);
+  }).catch(function () { toast('No se pudo calcular la ruta (sin internet)'); })
+    .then(function () { nav.busy = false; });
+}
+function setRoute(rt) {
+  nav.route = rt.geometry.coordinates; nav.total = rt.distance / 1000; nav.dur = rt.duration;
+  nav.cum = [0];
+  for (var i = 1; i < nav.route.length; i++) nav.cum.push(nav.cum[i - 1] + hav([nav.route[i - 1][1], nav.route[i - 1][0]], [nav.route[i][1], nav.route[i][0]]));
+  nav.steps = [];
+  rt.legs.forEach(function (l) { l.steps.forEach(function (st) { nav.steps.push({ loc: st.maneuver.location, type: st.maneuver.type, mod: st.maneuver.modifier || '', name: st.name || '', exit: st.maneuver.exit }); }); });
+  nav.idx = nav.steps.length > 1 ? 1 : 0; nav.offSince = 0;
+  drawRoute(); viz.hasRoute = true;
+  $('mapwrapEl').classList.add('navon'); $('eta').hidden = false;
+}
+function routeCoords() {
+  if (!nav.route) return [];
+  if (nav.cut > 0 && lastState && lastState.fix) return [[lastState.lon, lastState.lat]].concat(nav.route.slice(nav.cut));
+  return nav.route;
+}
+var turnMarker = null, lTurn = null, turnIdx = -1;
+function drawRoute() {
+  var gj = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoords() } };
+  if (ml && mlReady) {
+    if (ml.getSource('route')) ml.getSource('route').setData(gj);
+    else {
+      var first; ml.getStyle().layers.some(function (l) { if (l.type === 'symbol') { first = l.id; return true; } return false; });
+      ml.addSource('route', { type: 'geojson', data: gj });
+      ml.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#1f47b8', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 16] } }, first);
+      ml.addLayer({ id: 'route', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#3e7bfa', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 17, 11] } }, first);
+    }
+    if (destMarker) { destMarker.remove(); destMarker = null; }
+    if (nav.dest) { var el = document.createElement('div'); el.innerHTML = PIN; destMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(nav.dest).addTo(ml); }
+  } else if (map && window.L) {
+    if (nav.layer) map.removeLayer(nav.layer);
+    if (lDest) { map.removeLayer(lDest); lDest = null; }
+    nav.layer = L.geoJSON(gj, { style: { color: '#3e7bfa', weight: 9, opacity: .95 } }).addTo(map);
+    if (nav.dest) lDest = L.marker([nav.dest[1], nav.dest[0]], { icon: L.divIcon({ className: '', html: PIN, iconSize: [30, 40], iconAnchor: [15, 40] }), interactive: false }).addTo(map);
+  }
+  turnIdx = -1; drawTurnMark();
+}
+// White turn arrow on the route at the next manoeuvre (as Tesla does)
+function drawTurnMark() {
+  var st = nav.route && nav.steps[nav.idx];
+  if (turnMarker) { turnMarker.remove(); turnMarker = null; }
+  if (lTurn && map) { map.removeLayer(lTurn); lTurn = null; }
+  if (!st || st.type === 'arrive') return;
+  var html = '<span class="turnmark">' + stepIcon(st) + '</span>';
+  if (ml && mlReady) { var el = document.createElement('div'); el.innerHTML = html; turnMarker = new maplibregl.Marker({ element: el }).setLngLat(st.loc).addTo(ml); }
+  else if (map) lTurn = L.marker([st.loc[1], st.loc[0]], { icon: L.divIcon({ className: '', html: html, iconSize: [30, 30], iconAnchor: [15, 15] }), interactive: false }).addTo(map);
+  turnIdx = nav.idx;
+}
+function overview(auto) {
+  if (!nav.route) { toast('No hay una ruta activa'); return; }
+  var lons = nav.route.map(function (c) { return c[0]; }), lats = nav.route.map(function (c) { return c[1]; });
+  var b = [[Math.min.apply(null, lons), Math.min.apply(null, lats)], [Math.max.apply(null, lons), Math.max.apply(null, lats)]];
+  follow = false; $('recenter').classList.remove('follow');
+  if (ml && mlReady) ml.fitBounds(b, { padding: { top: 140, bottom: 170, left: 40, right: 70 }, bearing: 0, pitch: 0, duration: 900 });
+  else if (map) map.fitBounds([[b[0][1], b[0][0]], [b[1][1], b[1][0]]], { padding: [60, 60] });
+  // After a short look at the whole route, go back to following the car (like Tesla).
+  if (auto) setTimeout(function () { follow = true; $('recenter').classList.add('follow'); }, 5000);
+}
+$('overview').onclick = function () { overview(false); };
+function endNav() {
+  nav.cut = 0; $('maneuver').classList.remove('open');
+  nav.route = null; nav.steps = []; nav.dest = null; viz.hasRoute = false; drawRoute();
+  $('maneuver').hidden = true; $('eta').hidden = true; $('mapwrapEl').classList.remove('navon');
+}
+$('mClose').onclick = function () { endNav(); say('Navegación terminada'); };
+$('etaWaze').onclick = function () {
+  if (nav.dest) act('navto:' + nav.dest[1] + ',' + nav.dest[0] + ',' + nav.label.replace(/,/g, ' '));
+  else Car.open('app_maps');
+};
+
+// --- satellite ---
+var sat = store.get('sat', '0') === '1';
+function applySat() {
+  $('map').classList.toggle('sat', sat);
+  $('satBtn').classList.toggle('follow', sat);
+  if (ml && mlReady) {
+    if (sat && !ml.getLayer('sat')) {
+      if (!ml.getSource('sat')) ml.addSource('sat', { type: 'raster', tileSize: 256, maxzoom: 19, attribution: 'Imágenes © Esri',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'] });
+      var first = null; ml.getStyle().layers.some(function (l) { if (l.type === 'symbol' || l.id === 'route-case') { first = l.id; return true; } return false; });
+      ml.addLayer({ id: 'sat', type: 'raster', source: 'sat' }, first || undefined);
+    } else if (!sat && ml.getLayer('sat')) ml.removeLayer('sat');
+  } else if (map && tiles) {
+    tiles.setUrl(sat ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      : 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}');
+  }
+}
+$('satBtn').onclick = function () { sat = !sat; store.set('sat', sat ? '1' : '0'); applySat(); };
+
+// --- instructions ---
+var TURN = {
+  right: 'M6 20h2v-7h8.17l-2.58 2.59L15 17l5-5-5-5-1.41 1.41L16.17 11H8a2 2 0 0 0-2 2v7z',
+  left: 'M18 20h-2v-7H7.83l2.58 2.59L9 17l-5-5 5-5 1.41 1.41L7.83 11H16a2 2 0 0 1 2 2v7z',
+  straight: 'M11 20h2V7.83l3.59 3.58L18 10l-6-6-6 6 1.41 1.41L11 7.83z',
+  uturn: 'M17 20h2V9a5 5 0 0 0-10 0v4.17l-2.59-2.58L5 12l5 5 5-5-1.41-1.41L11 13.17V9a3 3 0 0 1 6 0v11z',
+  round: 'M12 5a7 7 0 0 0-1 13.93V22h2v-3.07A7 7 0 0 0 12 5zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM11 1h2v5h-2z',
+  flag: 'M14.4 6 14 4H5v17h2v-7h5.6l.4 2h7V6z'
+};
+var ORD = ['', 'primera', 'segunda', 'tercera', 'cuarta', 'quinta', 'sexta'];
+function stepText(st) {
+  var dir = { right: 'a la derecha', left: 'a la izquierda', 'slight right': 'levemente a la derecha', 'slight left': 'levemente a la izquierda',
+    'sharp right': 'cerrado a la derecha', 'sharp left': 'cerrado a la izquierda', straight: 'derecho', uturn: 'en U' }[st.mod] || '';
+  var onto = st.name ? ' hacia ' + st.name : '';
+  switch (st.type) {
+    case 'arrive': return 'Llegas a ' + nav.label;
+    case 'roundabout': case 'rotary': case 'roundabout turn': return 'En la glorieta toma la ' + (ORD[st.exit] || '') + ' salida' + onto;
+    case 'merge': return 'Incorpórate ' + dir + onto;
+    case 'fork': return 'Mantente ' + dir + onto;
+    case 'on ramp': case 'off ramp': return 'Toma la salida ' + dir + onto;
+    case 'continue': case 'new name': return 'Sigue ' + (dir === 'derecho' || !dir ? 'derecho' : dir) + onto;
+    case 'end of road': return 'Al final de la vía gira ' + dir + onto;
+    default: return (st.mod === 'uturn' ? 'Haz un giro en U' : st.mod === 'straight' ? 'Sigue derecho' : 'Gira ' + dir) + onto;
+  }
+}
+function stepIcon(st) {
+  var k = st.type === 'arrive' ? 'flag' : /round|rotary/.test(st.type) ? 'round' : st.mod.indexOf('right') >= 0 ? 'right' : st.mod.indexOf('left') >= 0 ? 'left' : st.mod === 'uturn' ? 'uturn' : 'straight';
+  return '<svg viewBox="0 0 24 24"><path d="' + TURN[k] + '"/></svg>';
+}
+function fmtDist(km) { return km >= 1 ? km.toFixed(1).replace('.', ',') + ' km' : (Math.round(km * 1000 / 10) * 10) + ' m'; }
+function spokenDist(m) { return m >= 1000 ? (m >= 1500 ? (Math.round(m / 500) / 2).toString().replace('.', ',') + ' kilómetros' : 'un kilómetro') : (Math.round(m / 50) * 50) + ' metros'; }
+function nearestOnRoute(p) {
+  if (world.lat0) { // projection on the route segments (metres), so the remaining distance is exact
+    routeLocal();
+    var q = toLocal(p[1], p[0]), sn = segNearest(world.routeRaw, q[0], q[1]);
+    return { d: sn.d / 1000, i: sn.i, km: nav.cum[sn.i - 1] + sn.t / 1000 };
+  }
+  var best = 1e9, bi = 0;
+  for (var i = 0; i < nav.route.length; i++) { var d = hav(p, [nav.route[i][1], nav.route[i][0]]); if (d < best) { best = d; bi = i; } }
+  return { d: best, i: bi, km: nav.cum[bi] };
+}
+function clock(t) { var d = new Date(t), h = d.getHours(), ap = h < 12 ? 'a. m.' : 'p. m.'; h = h % 12 || 12; return h + ':' + pad(d.getMinutes()) + ' ' + ap; }
+// Small next-turn chip next to the speed in the drive view (like Tesla's visualization)
+function setChip(ico, dist, name) {
+  $('dturn').hidden = false; $('dtIco').innerHTML = ico; $('dtDist').textContent = dist; $('dtName').textContent = name;
+}
+// Tap the turn card: list of the remaining turns
+function turnList(p) {
+  var html = '', acc = hav(p, [nav.steps[nav.idx].loc[1], nav.steps[nav.idx].loc[0]]);
+  for (var i = nav.idx + 1; i < nav.steps.length && i < nav.idx + 8; i++) {
+    var a = nav.steps[i - 1].loc, b = nav.steps[i].loc; acc += hav([a[1], a[0]], [b[1], b[0]]);
+    html += '<div class="trow">' + stepIcon(nav.steps[i]) + '<span>' + esc(stepText(nav.steps[i])) + '</span><b>' + fmtDist(acc) + '</b></div>';
+  }
+  $('mList').innerHTML = html || '<div class="trow"><span>Sin más giros</span></div>';
+}
+$('maneuver').onclick = function () { if (!nav.route) return; this.classList.toggle('open'); if (this.classList.contains('open')) turnList(myPos()); };
+var navIconId = null;
+function updateNav(s) {
+  var box = $('maneuver');
+  // 1) Our own route has priority; 2) otherwise the Waze / Google Maps instructions (from their notification).
+  if (!nav.route && s.nav && s.nav.active) {
+    box.hidden = false; $('mapwrapEl').classList.add('navon');
+    $('mDist').textContent = s.nav.title || '';
+    $('mText').textContent = s.nav.text || '';
+    $('mSrc').textContent = 'Indicaciones de ' + (s.nav.app || 'la app de mapas');
+    $('mNext').hidden = true;
+    setChip($('mIco').innerHTML, s.nav.title || '', s.nav.text || '');
+    if (s.nav.iconId !== navIconId) {
+      navIconId = s.nav.iconId;
+      var ic = s.nav.iconId ? Car.navIcon() : '';
+      $('mIco').innerHTML = ic ? '<img alt="" src="' + ic + '">' : stepIcon({ type: '', mod: 'straight' });
+    }
+    return;
+  }
+  navIconId = null;
+  if (!nav.route) { box.hidden = true; $('mapwrapEl').classList.remove('navon'); $('dturn').hidden = true; return; }
+  if (!s.fix) return;
+  var p = [s.lat, s.lon];
+  if (hav(p, [nav.dest[1], nav.dest[0]]) < 0.04) { say('Llegaste a tu destino, ' + nav.label); toast('Llegaste a ' + nav.label); endNav(); return; }
+  var st = nav.steps[nav.idx];
+  while (st && st.type !== 'arrive' && hav(p, [st.loc[1], st.loc[0]]) < 0.025 && nav.idx < nav.steps.length - 1) { nav.idx++; st = nav.steps[nav.idx]; }
+  if (!st) { box.hidden = true; return; }
+  var near = nearestOnRoute(p);
+  // the part already driven disappears from the map
+  if (near.i !== nav.cut && near.d < 0.05) { nav.cut = near.i; if (ml && mlReady && ml.getSource('route')) ml.getSource('route').setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoords() } }); }
+  if (turnIdx !== nav.idx) drawTurnMark();
+  // Off the route for 8 s: recalculate (at most every 25 s).
+  if (near.d > 0.07) { if (!nav.offSince) nav.offSince = Date.now(); } else nav.offSince = 0;
+  if (nav.offSince && Date.now() - nav.offSince > 8000 && Date.now() - nav.lastRoute > 25000) { say('Recalculando'); nav.said = {}; fetchRoute(); }
+  var dKm = hav(p, [st.loc[1], st.loc[0]]), dM = dKm * 1000, txt = stepText(st);
+  box.hidden = false;
+  $('mDist').textContent = fmtDist(dKm);
+  $('mText').textContent = txt;
+  $('mSrc').textContent = '';
+  $('mIco').innerHTML = stepIcon(st);
+  var nx = nav.steps[nav.idx + 1];
+  $('mNext').hidden = !nx;
+  if (nx) $('mNext').innerHTML = 'Luego ' + stepIcon(nx) + '<span>' + esc(stepText(nx)) + '</span>';
+  if ($('maneuver').classList.contains('open')) turnList(p);
+  setChip(stepIcon(st), fmtDist(dKm), st.name || txt);
+  // trip summary
+  var left = Math.max(0, nav.total - near.km), secs = nav.total ? nav.dur * left / nav.total : 0;
+  $('etaTime').textContent = clock(Date.now() + secs * 1000);
+  $('etaMin').textContent = secs >= 3600 ? Math.floor(secs / 3600) + ' h ' + Math.round(secs % 3600 / 60) + ' min' : Math.max(1, Math.round(secs / 60)) + ' min';
+  $('etaKm').textContent = fmtDist(left);
+  $('etaBar').style.width = (nav.total ? Math.min(100, (1 - left / nav.total) * 100) : 0) + '%';
+  // Voice guidance: once at the start, ~400 m before the turn and again right before it.
+  if (!nav.startSaid) { nav.startSaid = true; say('Iniciando ruta a ' + nav.label + '. ' + (dM > 80 ? 'En ' + spokenDist(dM) + ', ' : '') + txt.charAt(0).toLowerCase() + txt.slice(1)); nav.said[nav.idx + 'a'] = 1; }
+  var key = nav.idx;
+  if (dM <= 450 && dM > 150 && !nav.said[key + 'a']) { nav.said[key + 'a'] = 1; say('En ' + spokenDist(dM) + ', ' + txt.charAt(0).toLowerCase() + txt.slice(1)); }
+  if (dM <= 70 && !nav.said[key + 'b'] && st.type !== 'arrive') { nav.said[key + 'b'] = 1; nav.said[key + 'a'] = 1; say(txt); }
+}
+showRecents();
+setTimeout(ensureMap, 50);
+
+// ---------- Render ----------
+var artId = null, drivingSince = 0, stoppedSince = Date.now();
+function pad(n) { return String(n).padStart(2, '0'); }
+function fmtKm(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+function mmss(ms) { var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + pad(s % 60); }
+var lastState = null;
+function render(s) {
+  lastState = s;
+  var root = document.documentElement, theme = s.night ? 'dark' : 'light';
+  if (root.dataset.theme !== theme) root.dataset.theme = theme;
+  setMapTheme(theme === 'dark');
+  document.body.classList.toggle('lights-on', !!s.lights);
+  if (spin && lit !== !!s.lights) { lit = !!s.lights; showFrame(frame); }
+  if (litNow !== !!s.lights) { litNow = !!s.lights; refreshCarMark(); }
+
+  if (carV !== (s.carV || '')) {
+    carV = s.carV || '';
+    if (!spin) {
+      var b = setCar($('carHome'), 'base', 'lit', 'genericSide');
+      $('mirror').innerHTML = b ? '<img alt="" src="' + b + '">' : $('genericSide').innerHTML;
+    }
+    setCar($('carTop'), 'top', 'toplit', 'genericTop');
+    if (carV) carPics(); // a new car package was imported
+  }
+  if (s.mapMode !== mapMode) { mapMode = s.mapMode || 'map'; $('appLaunch').hidden = mapMode !== 'app'; }
+  $('appGoText').textContent = s.mapsLabel ? 'Abrir ' + s.mapsLabel : 'Elegir app de mapas';
+  $('etaWaze').textContent = 'Abrir en ' + (s.mapsLabel || 'Waze');
+
+  var d = new Date();
+  $('time1').textContent = d.getHours() + ':' + pad(d.getMinutes());
+  $('temp1').textContent = s.wx ? s.wx.temp + '°C' : '--°C';
+  $('name').textContent = s.name || 'Conductor';
+
+  // Gear from GPS speed (simulated: the radio does not read the gearbox).
+  var sp = s.fix ? Math.max(0, Math.round(s.speed)) : 0;
+  var gear = sp >= 3 ? 'D' : 'P';
+  ['gear1', 'gear2'].forEach(function (id) {
+    $(id).innerHTML = 'PRND'.split('').map(function (g) { return g === gear ? '<b>' + g + '</b>' : '<span>' + g + '</span>'; }).join('');
+  });
+  $('speed').textContent = sp;
+  roadSpeed = sp;
+  // Auto view: as soon as the car moves (GPS), go to the driving view, unless the user just chose a view.
+  if (sp >= 5) { if (!drivingSince) drivingSince = Date.now(); stoppedSince = 0; } else { drivingSince = 0; if (!stoppedSince) stoppedSince = Date.now(); }
+  if (Date.now() > manualUntil && drivingSince && Date.now() - drivingSince > 1500 && view === 'home') showView('drive', true);
+  if (Date.now() > manualUntil && view === 'drive' && stoppedSince && Date.now() - stoppedSince > 90000) showView('home', true);
+  // Camera behind the car while moving; back to the view from above after 8 s stopped.
+  var side = document.querySelector('.side');
+  if (drivingSince && Date.now() - drivingSince > 800) side.classList.add('driving');
+  else if (stoppedSince && Date.now() - stoppedSince > 8000) side.classList.remove('driving');
+  updateTrip(s, sp);
+  updateLimit(s, sp);
+
+  var oilTxt = !s.oil.configured ? 'Aceite: configurar' : s.oil.left < 0 ? '¡Cambio de aceite!' : fmtKm(s.oil.left) + ' km';
+  $('oil1').querySelector('span').textContent = oilTxt;
+  $('oil2').textContent = s.oil.configured && s.oil.left >= 0 ? 'Aceite · ' + oilTxt : oilTxt;
+  $('oilWarn').hidden = !(s.oil.configured && (s.oil.warn || s.oil.left < 0));
+  $('oilWarn').textContent = s.oil.left < 0 ? '¡Cambio de aceite!' : 'Aceite: ' + fmtKm(s.oil.left) + ' km';
+  var pico = s.pico && s.pico.show;
+  $('pico1').hidden = !pico; $('pico2').hidden = !pico;
+  if (pico) $('pico2').textContent = s.pico.text || 'Pico y placa hoy';
+
+  var m = s.media || {};
+  document.querySelectorAll('.music').forEach(function (c) {
+    c.querySelector('.title').textContent = m.title || (m.access ? 'Nada sonando' : 'Ver la música aquí');
+    c.querySelector('.artist span').textContent = m.title ? (m.artist || m.src || '') : (m.access ? 'Toca para abrir la música' : 'Permite el acceso a notificaciones');
+    c.querySelector('.src').textContent = m.dur ? mmss(m.pos || 0) : '';
+    c.querySelector('.pp').setAttribute('d', m.playing ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
+    c.querySelector('.bar i').style.width = m.dur ? Math.min(100, (m.pos || 0) / m.dur * 100) + '%' : '0';
+  });
+  if (m.artId !== artId) {
+    artId = m.artId;
+    var url = artId ? Car.art() : '';
+    document.querySelectorAll('.music .art').forEach(function (a) { a.style.backgroundImage = url ? 'url(' + url + ')' : ''; a.classList.toggle('has', !!url); });
+  }
+  $('vol').textContent = s.vol >= 0 ? s.vol : '–';
+  updateMap(s);
+  updateDrive(s, sp);
+  updateNav(s);
+}
+function tick() { try { render(JSON.parse(Car.state())); } catch (e) {} }
+
+// ---------- Bar ----------
+function longPress(el, onTap, onLong) {
+  var timer = null, longDone = false;
+  function start() { longDone = false; timer = setTimeout(function () { longDone = true; onLong(); }, 600); }
+  function stop() { clearTimeout(timer); }
+  ['touchstart', 'mousedown'].forEach(function (ev) { el.addEventListener(ev, start, { passive: true }); });
+  ['touchend', 'touchcancel', 'touchmove', 'mouseup', 'mouseleave'].forEach(function (ev) { el.addEventListener(ev, stop, { passive: true }); });
+  el.oncontextmenu = function (e) { e.preventDefault(); };
+  el.onclick = function () { if (longDone) { longDone = false; return; } onTap(); };
+}
+document.querySelectorAll('[data-slot]').forEach(function (b) {
+  longPress(b, function () { Car.open(b.dataset.slot); }, function () { act('pick:' + b.dataset.slot); });
+});
+$('bCar').onclick = function () { act('settings'); };
+$('bApps').onclick = function () { act('apps'); };
+$('bOff').onclick = function () { act('screenoff'); };
+$('vUp').onclick = function () { act('volup'); };
+$('vDown').onclick = function () { act('voldown'); };
+$('profile').onclick = function () { act('settings'); };
+$('pico1').onclick = function () { act('settings'); };
+
+if (location.hash.indexOf('mapa') >= 0) showView('map');
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

@@ -1,8 +1,12 @@
 package com.simple.carlauncher;
 
+import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -11,18 +15,20 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.BaseAdapter;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.text.Collator;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /** Shared look (neon blue/purple) and small helpers for all screens. */
 final class Ui {
-
-    // MCU source ids for ACTION_REQUEST_CHANGE_SOURCE: the "Source" column of
-    // /nwdappconfig/app/ApplicationList.xml (not the AppID).
-    static final int SOURCE_MUSIC = -128;
-    static final int SOURCE_RADIO = 4;
-    static final int SOURCE_BT_MUSIC = -125;
 
     private Ui() { }
 
@@ -81,20 +87,42 @@ final class Ui {
         b.setBackground(circle(filled ? Color.WHITE : 0x26FFFFFF));
         b.setColorFilter(filled ? 0xFF2A1F6E : Color.WHITE);
         pressable(b, 0.88f);
-        b.setOnClickListener(v -> action.run());
+        b.setOnClickListener(click(action));
         return b;
     }
 
     static void pressable(View v, float scale) {
         v.setClickable(true);
-        v.setOnTouchListener((view, e) -> {
-            if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                view.animate().scaleX(scale).scaleY(scale).alpha(0.8f).setDuration(90).start();
-            } else if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) {
-                view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
+        v.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View view, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                    view.animate().scaleX(scale).scaleY(scale).alpha(0.8f).setDuration(90).start();
+                } else if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) {
+                    view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start();
+                }
+                return false;
             }
-            return false;
         });
+    }
+
+    // Android has no java.lang.invoke.LambdaMetafactory and this project is built without
+    // desugaring, so the code uses anonymous classes instead of lambdas (no "->" or "::").
+
+    static View.OnClickListener click(final Runnable r) {
+        return new View.OnClickListener() {
+            public void onClick(View v) {
+                r.run();
+            }
+        };
+    }
+
+    static View.OnLongClickListener longClick(final Runnable r) {
+        return new View.OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                r.run();
+                return true;
+            }
+        };
     }
 
     static void launch(Context c, String component) {
@@ -109,10 +137,106 @@ final class Ui {
         }
     }
 
-    /** Asks the NWD kernel to route this audio source to the speakers. */
-    static void requestSource(Context c, int sourceId) {
-        Intent i = new Intent("com.nwd.action.ACTION_REQUEST_CHANGE_SOURCE");
-        i.putExtra("extra_source_id", (byte) sourceId);
-        c.sendBroadcast(i);
+    // ---------- Buttons that open an app chosen by the user ----------
+
+    interface AppChosen {
+        void onApp(String component); // null = "none"
+    }
+
+    /** Opens the app assigned to the button; the first time, asks which one. */
+    static void openSlot(Activity a, String slot, String title) {
+        String comp = Prefs.app(a, slot);
+        if (comp == null) {
+            pickApp(a, title, new AppChosen() {
+                public void onApp(String chosen) {
+                    Prefs.setApp(a, slot, chosen);
+                    if (chosen != null) launch(a, chosen);
+                }
+            });
+        } else {
+            launch(a, comp);
+        }
+    }
+
+    /** List of installed apps with icons; the first row clears the button. */
+    static void pickApp(Activity a, String title, AppChosen cb) {
+        PackageManager pm = a.getPackageManager();
+        Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> apps = new ArrayList<>();
+        for (ResolveInfo ri : pm.queryIntentActivities(main, 0)) {
+            if (!ri.activityInfo.packageName.equals(a.getPackageName())) apps.add(ri);
+        }
+        Collator collator = Collator.getInstance();
+        Collections.sort(apps, new java.util.Comparator<ResolveInfo>() {
+            public int compare(ResolveInfo x, ResolveInfo y) {
+                return collator.compare(x.loadLabel(pm).toString(), y.loadLabel(pm).toString());
+            }
+        });
+
+        BaseAdapter adapter = new BaseAdapter() {
+            public int getCount() { return apps.size() + 1; }
+            public Object getItem(int p) { return p; }
+            public long getItemId(int p) { return p; }
+            public View getView(int p, View convert, ViewGroup parent) {
+                LinearLayout row = new LinearLayout(a);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(a, 20), dp(a, 10), dp(a, 20), dp(a, 10));
+                ImageView icon = new ImageView(a);
+                TextView label = new TextView(a);
+                label.setTextSize(18);
+                label.setTextColor(Color.WHITE);
+                label.setPadding(dp(a, 16), 0, 0, 0);
+                if (p == 0) {
+                    icon.setImageResource(R.drawable.ic_backspace);
+                    icon.setColorFilter(0x99FFFFFF);
+                    label.setText("Ninguna (dejar sin asignar)");
+                } else {
+                    ResolveInfo ri = apps.get(p - 1);
+                    icon.setImageDrawable(ri.loadIcon(pm));
+                    label.setText(ri.loadLabel(pm));
+                }
+                row.addView(icon, new LinearLayout.LayoutParams(dp(a, 44), dp(a, 44)));
+                row.addView(label);
+                return row;
+            }
+        };
+        new AlertDialog.Builder(a, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle(title)
+                .setAdapter(adapter, new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int which) {
+                        if (which == 0) {
+                            cb.onApp(null);
+                        } else {
+                            ResolveInfo ri = apps.get(which - 1);
+                            cb.onApp(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name).flattenToString());
+                        }
+                    }
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    /** One-line text input dialog. */
+    interface TextChosen {
+        void onText(String s);
+    }
+
+    static void askText(Activity a, String title, String hint, String initial, int inputType, TextChosen cb) {
+        android.widget.EditText input = new android.widget.EditText(a);
+        input.setInputType(inputType);
+        input.setHint(hint);
+        input.setText(initial);
+        input.setSelectAllOnFocus(true);
+        input.setTextSize(24);
+        new AlertDialog.Builder(a, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle(title)
+                .setView(input)
+                .setPositiveButton("Guardar", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        cb.onText(input.getText().toString().trim());
+                    }
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 }

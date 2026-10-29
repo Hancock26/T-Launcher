@@ -37,7 +37,7 @@ public class OilActivity extends Activity {
 
         LinearLayout bar0 = new LinearLayout(this);
         bar0.setGravity(Gravity.CENTER_VERTICAL);
-        bar0.addView(Ui.iconButton(this, R.drawable.ic_back, 48, false, this::finish),
+        bar0.addView(Ui.iconButton(this, R.drawable.ic_back, 48, false, new Runnable() { public void run() { finish(); } }),
                 new LinearLayout.LayoutParams(dp(48), dp(48)));
         TextView title = Ui.text(this, "Cambio de aceite", 26, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -97,23 +97,26 @@ public class OilActivity extends Activity {
         card.setPadding(dp(16), dp(16), dp(16), dp(16));
         card.setBackground(Ui.card(this));
 
-        card.addView(action("Hice el cambio de aceite hoy", 0xFF2ECC71, () -> {
-            Odometer.setLastChangeKm(this, Odometer.currentKm(this));
-            Toast.makeText(this, "¡Listo! Registrado el cambio de aceite", Toast.LENGTH_SHORT).show();
+        final OilActivity self = this;
+        card.addView(action("Hice el cambio de aceite hoy", 0xFF2ECC71, new Runnable() { public void run() {
+            Odometer.setLastChangeKm(self, Odometer.currentKm(self));
+            Toast.makeText(self, "¡Listo! Registrado el cambio de aceite", Toast.LENGTH_SHORT).show();
             refresh();
-        }));
-        card.addView(action("Ajustar kilometraje del tablero", 0x334F7BFF,
-                () -> askKm("Kilometraje actual del tablero", Odometer.currentKm(this), km -> {
-                    boolean first = !Odometer.isConfigured(this);
-                    Odometer.setCurrentKm(this, km);
-                    if (first) Odometer.setLastChangeKm(this, km);
-                    refresh();
-                })));
-        card.addView(action("Último cambio fue a los… km", 0x334F7BFF,
-                () -> askKm("Kilometraje del último cambio", Odometer.lastChangeKm(this), km -> {
-                    Odometer.setLastChangeKm(this, km);
-                    refresh();
-                })));
+        }}));
+        card.addView(action("Ajustar kilometraje del tablero", 0x334F7BFF, new Runnable() { public void run() {
+            askKm("Kilometraje actual del tablero", Odometer.currentKm(self), new KmListener() { public void onKm(int km) {
+                boolean first = !Odometer.isConfigured(self);
+                Odometer.setCurrentKm(self, km);
+                if (first) Odometer.setLastChangeKm(self, km);
+                refresh();
+            }});
+        }}));
+        card.addView(action("Último cambio fue a los… km", 0x334F7BFF, new Runnable() { public void run() {
+            askKm("Kilometraje del último cambio", Odometer.lastChangeKm(self), new KmListener() { public void onKm(int km) {
+                Odometer.setLastChangeKm(self, km);
+                refresh();
+            }});
+        }}));
 
         TextView every = Ui.text(this, "Cambiar cada", 15, 0xCCFFFFFF);
         every.setGravity(Gravity.START);
@@ -125,10 +128,10 @@ public class OilActivity extends Activity {
             TextView c = Ui.text(this, fmt(km), 15, Color.WHITE);
             c.setPadding(0, dp(12), 0, dp(12));
             Ui.pressable(c, 0.92f);
-            c.setOnClickListener(v -> {
-                Odometer.setIntervalKm(this, km);
+            c.setOnClickListener(Ui.click(new Runnable() { public void run() {
+                Odometer.setIntervalKm(OilActivity.this, km);
                 refresh();
-            });
+            }}));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
             lp.setMargins(dp(3), 0, dp(3), 0);
             chips.addView(c, lp);
@@ -151,7 +154,7 @@ public class OilActivity extends Activity {
         bg.setCornerRadius(dp(14));
         b.setBackground(bg);
         Ui.pressable(b, 0.96f);
-        b.setOnClickListener(v -> r.run());
+        b.setOnClickListener(Ui.click(r));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = dp(8);
         b.setLayoutParams(lp);
@@ -171,10 +174,12 @@ public class OilActivity extends Activity {
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle(title)
                 .setView(input)
-                .setPositiveButton("Guardar", (d, w) -> {
-                    try {
-                        l.onKm(Integer.parseInt(input.getText().toString().trim()));
-                    } catch (NumberFormatException ignored) { }
+                .setPositiveButton("Guardar", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        try {
+                            l.onKm(Integer.parseInt(input.getText().toString().trim()));
+                        } catch (NumberFormatException ignored) { }
+                    }
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
@@ -213,7 +218,7 @@ public class OilActivity extends Activity {
     }
 
     static String fmt(int km) {
-        return String.format(new Locale("es", "EC"), "%,d", km).replace(',', '.');
+        return String.format(new Locale("es", "CO"), "%,d", km).replace(',', '.');
     }
 
     private int dp(int v) {

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d2029"/><stop offset="1" stop-color="#07080b"/></linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b6070"/><stop offset="1" stop-color="#9aa0ae"/></linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#2f62e6"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- T-junction seen from above: the top bar is the cross street, the stem is our road -->
+  <path d="M70 118 H442 V198 H316 L352 452 H160 L196 198 H70 Z" fill="url(#road)"/>
+  <path d="M90 158 H180 M222 158 H290 M332 158 H422" stroke="#e9ecf2" stroke-width="7" stroke-linecap="round" stroke-dasharray="26 22" opacity=".75"/>
+  <!-- blue route turning right at the junction -->
+  <path d="M256 418 L256 182 Q256 160 280 160 L430 160" fill="none" stroke="url(#glow)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M256 418 L256 182 Q256 160 280 160 L430 160" fill="none" stroke="#a9c3ff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+  <!-- red position arrow -->
+  <path d="M256 330 L292 424 L256 404 L220 424 Z" fill="#e82127" stroke="#fff" stroke-width="10" stroke-linejoin="round"/>
+</svg>

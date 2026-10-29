@@ -1,0 +1,2 @@
+Keystore con la que se firmó CleanLauncher.apk (contraseña: android, alias: androiddebugkey).
+Guárdala: las actualizaciones deben firmarse con esta misma para instalarse encima.

@@ -13,7 +13,8 @@ import android.view.View;
 import android.view.WindowManager;
 
 /**
- * Screen-off mode that survives steering-wheel keys.
+ * Screen-off mode that survives steering-wheel keys. On NWD/Allwinner radios the backlight is
+ * switched off; on other head units the screen goes black at minimum brightness.
  *
  * The factory screen-off uses the kernel "backlight switch", and the NWD kernel turns the
  * backlight back on (and swallows the key) on every key press. Here the LCD backlight is
@@ -45,6 +46,12 @@ public class ScreenOffActivity extends Activity {
     protected void onResume() {
         super.onResume();
         off = setBacklight(false);
+        if (!off) {
+            // Other head units: just a black screen at minimum brightness.
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = 0f;
+            getWindow().setAttributes(lp);
+        }
     }
 
     @Override

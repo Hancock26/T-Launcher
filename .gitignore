@@ -1,11 +1,11 @@
-# Salida de build.sh
-build/
-*.apk
-*.dex
 
 # APKs de fábrica descompilados y dumps (propietarios, ~300 MB)
-nwd/
-
+# Salida de build.sh
+*.apk
+*.dex
 *.keystore
-.vscode/
 .idea/
+.vscode/
+build/
+nwd/
+personal/

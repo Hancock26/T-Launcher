@@ -13,25 +13,25 @@ import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.KeyEvent;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Tracks what is playing from any source and routes controls back to it:
- * apps with a media session (Spotify, YouTube Music…), the factory USB/SD player
- * (com.android.music.* broadcasts) and Bluetooth audio (com.bt.* broadcasts).
+ * Tracks what is playing and routes controls back to it. Works with any app that publishes a
+ * media session: Spotify, YouTube Music, the head unit's own radio/USB/Bluetooth players on most
+ * Android 10+ units… Older players that only send com.android.music broadcasts are also read.
+ * Needs "notification access" for this app (Android shows the sessions only to listeners).
  */
 final class NowPlaying {
 
-    enum Source { APP, LOCAL, BT }
+    enum Source { APP, LOCAL }
 
     interface Listener {
         void onNowPlayingChanged();
     }
-
-    private static final String LOCAL_PLAYER = "com.nwd.android.music.ui/.home_horizontalActivity";
 
     /** State reported by one source. */
     static final class Track {
@@ -39,6 +39,17 @@ final class NowPlaying {
         Bitmap art;
         boolean playing;
         long updated;
+        long duration;      // ms, 0 = unknown
+        long position;      // ms at positionTime
+        long positionTime;  // elapsedRealtime of the position
+        float speed = 1f;
+
+        /** Current playback position, moving forward while playing. */
+        long positionNow() {
+            if (duration <= 0) return 0;
+            long p = position + (playing ? (long) ((SystemClock.elapsedRealtime() - positionTime) * speed) : 0);
+            return Math.max(0, Math.min(duration, p));
+        }
     }
 
     private static NowPlaying instance;
@@ -50,12 +61,12 @@ final class NowPlaying {
 
     private final Context ctx;
     private final List<Listener> listeners = new ArrayList<>();
-    private final Track app = new Track(), local = new Track(), bt = new Track();
-    final BtClient btClient = new BtClient();
+    private final Track app = new Track(), local = new Track();
 
     private final MediaSessionManager sessions;
     private final ComponentName notificationListener;
     private MediaController controller;
+    private boolean sessionListenerAdded;
 
     private NowPlaying(Context c) {
         ctx = c;
@@ -65,73 +76,29 @@ final class NowPlaying {
         IntentFilter f = new IntentFilter();
         f.addAction("com.android.music.metachanged");
         f.addAction("com.android.music.playstatechanged");
-        f.addAction("com.bt.ACTION_AVRCP_MUSIC_ID3");
-        f.addAction("com.bt.ACTION_BT_MUSIC_PLAY");
-        f.addAction("com.bt.ACTION_BT_MUSIC_PAUSE");
-        f.addAction("com.bt.ACTION_A2DP_RELEASE");
-        f.addAction("com.bt.ACTION_AVRCP_RELEASE");
         c.registerReceiver(receiver, f);
-
-        try {
-            sessions.addOnActiveSessionsChangedListener(list -> refreshSessions(), notificationListener);
-        } catch (SecurityException ignored) {
-            // Notification access not granted: app sessions are not visible.
-        }
         refreshSessions();
+    }
 
-        btClient.bind(c, () -> {
-            bt.playing = btClient.isMusicPlaying();
-            if (bt.playing) bt.updated = SystemClock.elapsedRealtime();
-            btClient.queryId3();
-            notifyListeners();
-        });
+    /** True when the user allowed this app to read notifications (needed for media sessions). */
+    static boolean hasAccess(Context c) {
+        String s = Settings.Secure.getString(c.getContentResolver(), "enabled_notification_listeners");
+        return s != null && s.contains(c.getPackageName());
     }
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
-            String a = i.getAction();
-            if (a == null) return;
-            i.setExtrasClassLoader(NowPlaying.class.getClassLoader());
             try {
-                handle(a, i);
+                if (i.hasExtra("track")) local.title = nz(i.getStringExtra("track"));
+                if (i.hasExtra("artist")) local.artist = nz(i.getStringExtra("artist"));
+                local.playing = i.getBooleanExtra("playing", local.playing);
+                local.updated = SystemClock.elapsedRealtime();
+                notifyListeners();
             } catch (RuntimeException e) {
                 // Factory apps may attach extras we cannot unparcel; never crash the launcher for it.
-                android.util.Log.w("NowPlaying", "Ignoring broadcast " + a, e);
+                android.util.Log.w("NowPlaying", "Ignoring broadcast", e);
             }
-        }
-
-        private void handle(String a, Intent i) {
-            long now = SystemClock.elapsedRealtime();
-            switch (a) {
-                case "com.android.music.metachanged":
-                case "com.android.music.playstatechanged":
-                    if (i.hasExtra("track")) local.title = nz(i.getStringExtra("track"));
-                    if (i.hasExtra("artist")) local.artist = nz(i.getStringExtra("artist"));
-                    local.playing = i.getBooleanExtra("playing", local.playing);
-                    local.updated = now;
-                    break;
-                case "com.bt.ACTION_AVRCP_MUSIC_ID3":
-                    bt.title = nz(i.getStringExtra("extra_avrcp_id3_title"));
-                    bt.artist = nz(i.getStringExtra("extra_avrcp_id3_artist"));
-                    if (!bt.title.isEmpty()) bt.updated = now;
-                    break;
-                case "com.bt.ACTION_BT_MUSIC_PLAY":
-                    bt.playing = true;
-                    bt.updated = now;
-                    btClient.queryId3();
-                    break;
-                case "com.bt.ACTION_BT_MUSIC_PAUSE":
-                    bt.playing = false;
-                    break;
-                default: // A2DP/AVRCP released: phone disconnected
-                    bt.playing = false;
-                    bt.title = "";
-                    bt.artist = "";
-                    bt.updated = 0;
-                    break;
-            }
-            notifyListeners();
         }
     };
 
@@ -146,8 +113,18 @@ final class NowPlaying {
     private void refreshSessions() {
         List<MediaController> list = null;
         try {
+            if (!sessionListenerAdded) {
+                sessions.addOnActiveSessionsChangedListener(new MediaSessionManager.OnActiveSessionsChangedListener() {
+                    public void onActiveSessionsChanged(List<MediaController> l) {
+                        refreshSessions();
+                    }
+                }, notificationListener);
+                sessionListenerAdded = true;
+            }
             list = sessions.getActiveSessions(notificationListener);
-        } catch (SecurityException ignored) { }
+        } catch (SecurityException ignored) {
+            // Notification access not granted yet.
+        }
         MediaController pick = null;
         if (list != null) {
             for (MediaController c : list) {
@@ -178,6 +155,12 @@ final class NowPlaying {
             Bitmap art = m == null ? null : m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
             if (art == null && m != null) art = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
             app.art = art;
+            app.duration = m == null ? 0 : m.getLong(MediaMetadata.METADATA_KEY_DURATION);
+            if (s != null) {
+                app.position = s.getPosition();
+                app.positionTime = s.getLastPositionUpdateTime() > 0 ? s.getLastPositionUpdateTime() : SystemClock.elapsedRealtime();
+                app.speed = s.getPlaybackSpeed() > 0 ? s.getPlaybackSpeed() : 1f;
+            }
             boolean playing = s != null && s.getState() == PlaybackState.STATE_PLAYING;
             if (playing || !app.title.isEmpty()) app.updated = SystemClock.elapsedRealtime();
             app.playing = playing;
@@ -204,13 +187,11 @@ final class NowPlaying {
     }
 
     Track track(Source s) {
-        return s == Source.APP ? app : s == Source.LOCAL ? local : bt;
+        return s == Source.APP ? app : local;
     }
 
     String label(Source s) {
-        if (s == Source.BT) return "Bluetooth";
-        if (s == Source.LOCAL) return "USB";
-        if (controller != null) {
+        if (s == Source.APP && controller != null) {
             try {
                 PackageManager pm = ctx.getPackageManager();
                 return pm.getApplicationLabel(pm.getApplicationInfo(controller.getPackageName(), 0)).toString();
@@ -221,9 +202,7 @@ final class NowPlaying {
 
     void playPause() {
         Source s = current();
-        if (s == Source.BT) {
-            btClient.playControl(bt.playing ? BtClient.PAUSE : BtClient.PLAY);
-        } else if (s == Source.APP && controller != null) {
+        if (s == Source.APP && controller != null) {
             if (app.playing) controller.getTransportControls().pause();
             else controller.getTransportControls().play();
         } else {
@@ -233,9 +212,7 @@ final class NowPlaying {
 
     void skip(boolean next) {
         Source s = current();
-        if (s == Source.BT) {
-            btClient.playControl(next ? BtClient.NEXT : BtClient.PREVIOUS);
-        } else if (s == Source.APP && controller != null) {
+        if (s == Source.APP && controller != null) {
             if (next) controller.getTransportControls().skipToNext();
             else controller.getTransportControls().skipToPrevious();
         } else {
@@ -243,23 +220,23 @@ final class NowPlaying {
         }
     }
 
-    /** Opens the screen that belongs to the current source. */
-    void open(Context c) {
-        Source s = current();
-        if (s == Source.BT) {
-            c.startActivity(new Intent(c, BtActivity.class));
-        } else if (s == Source.APP && controller != null) {
-            Intent i = c.getPackageManager().getLaunchIntentForPackage(controller.getPackageName());
-            if (i != null) c.startActivity(i);
-        } else {
-            Ui.launch(c, LOCAL_PLAYER);
-        }
+    /** Package of the app that is playing, or null. */
+    String playingPackage() {
+        return current() == Source.APP && controller != null ? controller.getPackageName() : null;
+    }
+
+    /** Re-reads the active sessions; also re-registers the listener once notification access exists. */
+    void refresh() {
+        refreshSessions();
+    }
+
+    boolean hasSession() {
+        return controller != null;
     }
 
     void addListener(Listener l) {
         listeners.add(l);
         refreshSessions();
-        if (btClient.isBound()) btClient.queryId3();
     }
 
     void removeListener(Listener l) {

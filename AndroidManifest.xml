@@ -1,21 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.simple.carlauncher"
-    android:versionCode="6"
-    android:versionName="6.0">
+    android:versionCode="22"
+    android:versionName="16.0">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Android 11+: see the other apps so the buttons can open them. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <application
-        android:label="Inicio"
-        android:icon="@drawable/ic_apps"
+        android:label="T-Launcher"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/LauncherTheme">
 
         <activity
             android:name=".MainActivity"
+            android:exported="true"
             android:launchMode="singleTask"
             android:stateNotNeeded="true"
             android:clearTaskOnLaunch="true"
@@ -35,15 +48,15 @@
             android:configChanges="orientation|screenSize|keyboardHidden|locale" />
 
         <activity
-            android:name=".RadioActivity"
-            android:label="Radio"
-            android:launchMode="singleTask"
+            android:name=".SettingsActivity"
+            android:label="Ajustes"
+            android:excludeFromRecents="true"
+            android:windowSoftInputMode="adjustPan"
             android:configChanges="orientation|screenSize|keyboardHidden|locale" />
 
         <activity
-            android:name=".BtActivity"
-            android:label="Bluetooth"
-            android:launchMode="singleTask"
+            android:name=".OilActivity"
+            android:label="Aceite"
             android:configChanges="orientation|screenSize|keyboardHidden|locale" />
 
         <activity
@@ -53,18 +66,11 @@
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:configChanges="orientation|screenSize|keyboardHidden|locale" />
 
-        <service android:name=".VolumeOverlay" />
+        <service android:name=".CarService" />
 
-        <service android:name=".GreeterService" />
-
-        <service android:name=".Odometer" />
-
-        <activity
-            android:name=".OilActivity"
-            android:label="Aceite"
-            android:configChanges="orientation|screenSize|keyboardHidden|locale" />
-
-        <receiver android:name=".GreeterService$BootReceiver">
+        <receiver
+            android:name=".CarService$BootReceiver"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
@@ -72,6 +78,7 @@
 
         <service
             android:name=".MediaListener"
+            android:exported="true"
             android:label="Inicio"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>

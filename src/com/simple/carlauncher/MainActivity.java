@@ -1,507 +1,562 @@
 package com.simple.carlauncher;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.SystemClock;
-import android.view.Gravity;
+import android.util.Base64;
 import android.view.View;
-import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.TextClock;
-import android.widget.TextView;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.util.Calendar;
 
-public class MainActivity extends Activity implements NowPlaying.Listener {
-
-    private static final String NAME = "Jhon";
-
-    private static final String MAPS = "com.google.android.apps.maps/com.google.android.maps.MapsActivity";
-    private static final String EQ = "com.nwd.audioset/.home_horizontalActivity";
-    private static final String SETTINGS = "com.android.car.setting/.home_horizontalActivity";
+/**
+ * Home screen in the style of a modern EV dashboard: car panel, live map and control bar.
+ * The screen itself is assets/home.html in a WebView; this activity feeds it through the
+ * "Car" JavaScript bridge (state once per second, actions back).
+ */
+public class MainActivity extends Activity implements LocationListener {
 
     private static final long WEATHER_EVERY_MS = 30 * 60 * 1000;
+    private static boolean askedLocation; // ask once per start, never in a loop
+    private volatile long lastSessionRefresh;
 
     private final Handler handler = new Handler();
-    private final RadioClient radio = new RadioClient();
+    private WebView web;
     private NowPlaying nowPlaying;
-
-    private TextView greeting, weatherTemp, weatherDesc, weatherCity, weatherExtra;
-    private ImageView weatherIcon;
-    private GradientDrawable weatherBg;
-    private ImageView car, carLights;
-    private TextView oilInfo;
-    private GradientDrawable oilBg;
+    private LocationManager lm;
     private long lastWeatherFetch;
 
-    private TextView fmBand, fmFreq, fmUnit;
-    private ImageView art, playBtn;
-    private TextView songSource, songTitle, songArtist;
+    // Written on the main thread, read by the bridge thread.
+    private volatile double lat, lon, speedKmh;
+    private volatile float bearing;
+    private volatile boolean fix;
 
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        web = new WebView(this);
+        web.setBackgroundColor(Lights.night(this) ? Color.BLACK : 0xFFE9EBEE);
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setAllowFileAccess(true);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setTextZoom(100);
+        web.setWebViewClient(new WebViewClient());
+        web.setLongClickable(false);
+        web.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View v) { return true; } // no text selection
+        });
+        web.setHapticFeedbackEnabled(false);
+        web.addJavascriptInterface(new Bridge(), "Car");
+        web.loadUrl("file:///android_asset/home.html");
+        setContentView(web);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(14), dp(16), dp(4));
-        root.setBackground(Ui.background(this));
-
-        LinearLayout cards = new LinearLayout(this);
-        cards.addView(buildWeatherCard(), weight(1.2f, 0));
-
-        LinearLayout middle = new LinearLayout(this);
-        middle.setOrientation(LinearLayout.VERTICAL);
-        middle.addView(buildClockCard(), vweight(0.62f, 0));
-        middle.addView(buildFmCard(), vweight(1.38f, dp(12)));
-        cards.addView(middle, weight(1f, dp(12)));
-
-        cards.addView(buildMusicCard(), weight(1.05f, dp(12)));
-        root.addView(cards, new LinearLayout.LayoutParams(-1, 0, 1f));
-
-        root.addView(buildDock(), new LinearLayout.LayoutParams(-1, dp(84)));
-        setContentView(root);
-
-        radio.bind(this);
+        installBundledCar();
         nowPlaying = NowPlaying.get(this);
-        startService(new Intent(this, VolumeOverlay.class));
-        startService(new Intent(this, GreeterService.class));
-        startService(new Intent(this, Odometer.class));
+        lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        CarService.start(this);
+
+        if (!Prefs.get(this).getBoolean("welcome_done", false)) {
+            Prefs.get(this).edit().putBoolean("welcome_done", true).apply();
+            askedLocation = true; // the welcome screen asks for it
+            startActivity(new Intent(this, SettingsActivity.class).putExtra("welcome", true));
+        }
     }
 
-    // ---------- Greeting + weather ----------
-
-    private View buildWeatherCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(26), dp(24), dp(26), dp(22));
-        weatherBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{0x993FA9FF, 0x667B4DFF});
-        weatherBg.setCornerRadius(dp(18));
-        weatherBg.setStroke(dp(1), 0x447FD8FF);
-        card.setBackground(weatherBg);
-
-        TextView hello = left(Ui.text(this, "Hola, " + NAME, 34, Color.WHITE));
-        hello.setTypeface(Typeface.DEFAULT_BOLD);
-        card.addView(hello);
-
-        greeting = left(Ui.text(this, "", 17, 0xCCFFFFFF));
-        greeting.setPadding(0, dp(4), 0, 0);
-        card.addView(greeting);
-
-        // The user's own car (photo with background removed); headlights glow when the car's lights are on.
-        FrameLayout carBox = new FrameLayout(this);
-        car = new ImageView(this);
-        car.setImageResource(R.drawable.optra);
-        car.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        carBox.addView(car, new FrameLayout.LayoutParams(-1, -1));
-        carLights = new ImageView(this);
-        carLights.setImageResource(R.drawable.optra_lights);
-        carLights.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        carLights.setAlpha(0f);
-        carBox.addView(carLights, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        clp.setMargins(dp(30), dp(8), dp(30), dp(8));
-        card.addView(carBox, clp);
-
-        // Compact weather row: icon + temperature + description, leaving room for the car.
-        LinearLayout now = new LinearLayout(this);
-        now.setGravity(Gravity.CENTER_VERTICAL);
-        weatherIcon = new ImageView(this);
-        weatherIcon.setImageResource(R.drawable.ic_w_cloud);
-        weatherIcon.setColorFilter(0xFFFFE07A);
-        now.addView(weatherIcon, new LinearLayout.LayoutParams(dp(54), dp(54)));
-        weatherTemp = left(Ui.text(this, "--°", 50, Color.WHITE));
-        weatherTemp.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        weatherTemp.setIncludeFontPadding(false);
-        weatherTemp.setPadding(dp(10), 0, dp(12), 0);
-        now.addView(weatherTemp);
-
-        LinearLayout texts = new LinearLayout(this);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        weatherDesc = left(Ui.text(this, "Cargando el clima…", 16, Color.WHITE));
-        weatherDesc.setSingleLine(false);
-        weatherDesc.setMaxLines(2);
-        texts.addView(weatherDesc);
-        weatherCity = left(Ui.text(this, "", 13, 0xB3FFFFFF));
-        weatherCity.setPadding(0, dp(2), 0, 0);
-        texts.addView(weatherCity);
-        now.addView(texts, new LinearLayout.LayoutParams(0, -2, 1f));
-        card.addView(now);
-
-        weatherExtra = left(Ui.text(this, "", 14, 0xE6FFFFFF));
-        weatherExtra.setPadding(dp(14), dp(8), dp(14), dp(8));
-        GradientDrawable chip = new GradientDrawable();
-        chip.setColor(0x26FFFFFF);
-        chip.setCornerRadius(dp(20));
-        weatherExtra.setBackground(chip);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.topMargin = dp(10);
-        card.addView(weatherExtra, lp);
-
-        Ui.pressable(card, 0.98f);
-        card.setOnClickListener(v -> fetchWeather(true));
-        return card;
+    /** Personal builds carry the user's car images in assets/car/: copy them once if none are loaded. */
+    private void installBundledCar() {
+        if (new File(getFilesDir(), SettingsActivity.CAR_FILE).exists()) return;
+        if (Prefs.get(this).getBoolean("bundled_car_done", false)) return;
+        String[] names = {SettingsActivity.CAR_FILE, SettingsActivity.CAR_LIT_FILE,
+                SettingsActivity.CAR_TOP_FILE, SettingsActivity.CAR_TOP_LIT_FILE};
+        for (String n : names) {
+            try (java.io.InputStream in = getAssets().open("car/" + n);
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(new File(getFilesDir(), n))) {
+                byte[] buf = new byte[16384];
+                for (int r; (r = in.read(buf)) > 0; ) out.write(buf, 0, r);
+            } catch (Exception ignored) {
+                // General build: no bundled images.
+            }
+        }
+        Prefs.get(this).edit().putBoolean("bundled_car_done", true).apply();
     }
 
-    private void updateGreeting() {
-        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        greeting.setText((h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches")
-                + " · Bienvenido");
+    // ---------- Bridge ----------
+
+    public final class Bridge {
+
+        @JavascriptInterface
+        public String state() {
+            Context c = MainActivity.this;
+            try {
+                JSONObject j = new JSONObject();
+                j.put("night", Lights.night(c));
+                j.put("lights", Lights.shownOn(c));
+                j.put("fix", fix);
+                j.put("lat", lat);
+                j.put("lon", lon);
+                j.put("speed", speedKmh);
+                j.put("bearing", bearing);
+                j.put("mapMode", Prefs.get(c).getString("map_mode", "map"));
+                j.put("paint", Prefs.get(c).getString("paint", "plata"));
+                String maps = Prefs.app(c, Prefs.APP_MAPS);
+                j.put("mapsLabel", maps == null ? "" : Prefs.appLabel(c, maps));
+
+                Weather w = Weather.cached(c);
+                if (w != null) {
+                    JSONObject wx = new JSONObject();
+                    wx.put("temp", w.temp);
+                    wx.put("code", w.code);
+                    wx.put("day", w.isDay);
+                    wx.put("city", w.city);
+                    j.put("wx", wx);
+                }
+
+                JSONObject oil = new JSONObject();
+                boolean conf = Odometer.isConfigured(c);
+                int left = conf ? Odometer.remainingKm(c) : 0;
+                oil.put("configured", conf);
+                oil.put("left", left);
+                oil.put("warn", conf && left <= Odometer.WARN_KM);
+                j.put("oil", oil);
+
+                PicoPlaca.Status ps = PicoPlaca.today(c);
+                JSONObject pico = new JSONObject();
+                boolean restricted = ps.state == PicoPlaca.State.RESTRICTED;
+                pico.put("show", restricted);
+                if (restricted) {
+                    pico.put("text", (ps.result.activeNow ? "Pico y placa ahora · " : "Hoy pico y placa · ")
+                            + PicoRules.hoursText(ps.result.today));
+                }
+                j.put("pico", pico);
+
+                // Sessions appear/disappear and access may be granted later: look again every few seconds.
+                long nowMs = android.os.SystemClock.elapsedRealtime();
+                if (!nowPlaying.hasSession() && nowMs - lastSessionRefresh > 4000) {
+                    lastSessionRefresh = nowMs;
+                    runOnUiThread(new Runnable() { public void run() { nowPlaying.refresh(); } });
+                }
+                AudioManager amx = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                boolean audioActive = amx.isMusicActive();
+                JSONObject media = new JSONObject();
+                NowPlaying.Source src = nowPlaying.current();
+                NowPlaying.Track t = src == null ? null : nowPlaying.track(src);
+                media.put("access", NowPlaying.hasAccess(c));
+                media.put("src", src == null ? "Música" : nowPlaying.label(src));
+                boolean noTitle = t == null || t.title.isEmpty();
+                // Players without a media session (some head-unit Bluetooth/radio apps): at least show that audio plays.
+                media.put("title", noTitle ? (audioActive ? "Reproduciendo" : "") : t.title);
+                media.put("artist", noTitle ? (audioActive ? "Audio del radio o Bluetooth" : "") : t.artist);
+                media.put("playing", (t != null && t.playing) || (noTitle && audioActive));
+                media.put("dur", t == null ? 0 : t.duration);
+                media.put("pos", t == null ? 0 : t.positionNow());
+                media.put("artId", t != null && t.art != null ? t.title + "|" + t.artist + "|" + t.art.getGenerationId() : "");
+                j.put("media", media);
+
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                j.put("vol", am.getStreamVolume(AudioManager.STREAM_MUSIC));
+                j.put("volMax", am.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+
+                File photo = new File(getFilesDir(), SettingsActivity.CAR_FILE);
+                File lit = new File(getFilesDir(), SettingsActivity.CAR_LIT_FILE);
+                File top = new File(getFilesDir(), SettingsActivity.CAR_TOP_FILE);
+                File chase = new File(getFilesDir(), SettingsActivity.CAR_CHASE_FILE);
+                j.put("carV", photo.exists() ? photo.lastModified() + ":" + (lit.exists() ? lit.lastModified() : 0)
+                        + ":" + (top.exists() ? top.lastModified() : 0) + ":" + (chase.exists() ? chase.lastModified() : 0) : "");
+                j.put("name", Prefs.name(c));
+                JSONObject addr = new JSONObject();
+                addr.put("home", Prefs.get(c).getString("addr_home", "").trim());
+                addr.put("work", Prefs.get(c).getString("addr_work", "").trim());
+                j.put("addr", addr);
+                NavInfo.Info n = NavInfo.current();
+                JSONObject nav = new JSONObject();
+                nav.put("active", n != null);
+                if (n != null) {
+                    nav.put("app", n.app);
+                    nav.put("title", n.title);
+                    nav.put("text", n.text);
+                    nav.put("iconId", n.icon == null ? "" : n.app + n.icon.getGenerationId());
+                }
+                j.put("nav", nav);
+                return j.toString();
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+
+        /** Album art of the current track as a data URL. */
+        @JavascriptInterface
+        public String art() {
+            NowPlaying.Source src = nowPlaying.current();
+            NowPlaying.Track t = src == null ? null : nowPlaying.track(src);
+            if (t == null || t.art == null) return "";
+            Bitmap b = t.art;
+            int max = Math.max(b.getWidth(), b.getHeight());
+            if (max > 256) b = Bitmap.createScaledBitmap(b, b.getWidth() * 256 / max, b.getHeight() * 256 / max, true);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            b.compress(Bitmap.CompressFormat.JPEG, 85, out);
+            return "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+        }
+
+        /** The user's car photo ("base" or "lit") as a data URL, or "". */
+        @JavascriptInterface
+        public String carImage(String which) {
+            String name = "lit".equals(which) ? SettingsActivity.CAR_LIT_FILE
+                    : "top".equals(which) ? SettingsActivity.CAR_TOP_FILE
+                    : "toplit".equals(which) ? SettingsActivity.CAR_TOP_LIT_FILE
+                    : "chase".equals(which) ? SettingsActivity.CAR_CHASE_FILE
+                    : "chaselit".equals(which) ? SettingsActivity.CAR_CHASE_LIT_FILE : SettingsActivity.CAR_FILE;
+            File f = new File(getFilesDir(), name);
+            if (!f.exists()) return "";
+            try (FileInputStream in = new FileInputStream(f)) {
+                byte[] buf = new byte[(int) f.length()];
+                int off = 0;
+                while (off < buf.length) {
+                    int n = in.read(buf, off, buf.length - off);
+                    if (n < 0) break;
+                    off += n;
+                }
+                return "data:image/png;base64," + Base64.encodeToString(buf, Base64.NO_WRAP);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        /** Turn arrow of the Waze / Google Maps navigation notification as a data URL. */
+        @JavascriptInterface
+        public String navIcon() {
+            NavInfo.Info n = NavInfo.current();
+            if (n == null || n.icon == null) return "";
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            n.icon.compress(Bitmap.CompressFormat.PNG, 100, out);
+            return "data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+        }
+
+        /**
+         * Address search with Android's own geocoder (Google's address database on radios with Google services):
+         * much better than OpenStreetMap for Colombian addresses ("Calle 72 # 46-30"). Asynchronous: the result
+         * arrives in window.onGeo(id, json).
+         */
+        @JavascriptInterface
+        public boolean geocode(final String id, final String q, final double lat, final double lon) {
+            if (!android.location.Geocoder.isPresent()) return false;
+            new Thread(new Runnable() {
+                public void run() {
+                    org.json.JSONArray arr = new org.json.JSONArray();
+                    try {
+                        android.location.Geocoder gc = new android.location.Geocoder(MainActivity.this, new java.util.Locale("es", "CO"));
+                        java.util.List<android.location.Address> list = null;
+                        if (lat != 0 || lon != 0) list = gc.getFromLocationName(q, 6, lat - 0.35, lon - 0.35, lat + 0.35, lon + 0.35);
+                        if (list == null || list.isEmpty()) list = gc.getFromLocationName(q + ", Colombia", 6);
+                        if (list != null) for (android.location.Address ad : list) {
+                            if (!ad.hasLatitude()) continue;
+                            JSONObject o = new JSONObject();
+                            String line = ad.getMaxAddressLineIndex() >= 0 ? ad.getAddressLine(0) : "";
+                            String name = ad.getFeatureName() != null && !ad.getFeatureName().matches("[0-9 -]+") ? ad.getFeatureName() : line;
+                            if (line != null && line.contains(",")) name = ad.getFeatureName() != null && !ad.getFeatureName().matches("[0-9 -]+")
+                                    && !line.startsWith(ad.getFeatureName()) ? ad.getFeatureName() : line.substring(0, line.indexOf(','));
+                            o.put("name", name == null ? q : name);
+                            o.put("sub", line == null ? "" : line);
+                            o.put("lat", ad.getLatitude());
+                            o.put("lon", ad.getLongitude());
+                            o.put("src", "google");
+                            arr.put(o);
+                        }
+                    } catch (Exception ignored) {
+                        // no network / no geocoder backend: the other sources still answer
+                    }
+                    final String js = "window.onGeo && window.onGeo(" + JSONObject.quote(id) + "," + JSONObject.quote(arr.toString()) + ")";
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            web.evaluateJavascript(js, null);
+                        }
+                    });
+                }
+            }).start();
+            return true;
+        }
+
+        /** Which voice the navigation uses (shown in Ajustes). */
+        @JavascriptInterface
+        public String voiceInfo() {
+            return navVoiceName == null ? "" : navVoiceName;
+        }
+
+        /** Spoken turn instruction (Tesla-style voice guidance), over the music which is ducked. */
+        @JavascriptInterface
+        public void say(final String text) {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    speakNav(text);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void open(final String slot) {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    Ui.openSlot(MainActivity.this, slot, titleFor(slot));
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void action(final String a) {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    doAction(a);
+                }
+            });
+        }
     }
 
-    private void showWeather(Weather w) {
-        if (w == null) return;
-        weatherIcon.setImageResource(w.icon());
-        weatherIcon.setColorFilter(w.icon() == R.drawable.ic_w_sun ? 0xFFFFD25A
-                : w.icon() == R.drawable.ic_w_moon ? 0xFFDDE4FF : Color.WHITE);
-        weatherTemp.setText(w.temp + "°");
-        weatherDesc.setText(w.description());
-        weatherCity.setText(w.city.isEmpty() ? "Sensación " + w.feelsLike + "°"
-                : w.city + " · Sensación " + w.feelsLike + "°");
-        weatherExtra.setText("↑ " + w.max + "°   ↓ " + w.min + "°   💧 " + w.humidity + "%   " + w.wind + " km/h");
-        weatherBg.setColors(w.isDay ? new int[]{0x993FA9FF, 0x667B4DFF} : new int[]{0x8C2A3A9E, 0x80261A6E});
+    private static String titleFor(String slot) {
+        if (Prefs.APP_PHONE.equals(slot)) return "¿Qué app abre Bluetooth / teléfono?";
+        if (Prefs.APP_RADIO.equals(slot)) return "¿Qué app es la radio FM?";
+        if (Prefs.APP_MUSIC.equals(slot)) return "¿Qué app de música quieres abrir?";
+        if (Prefs.APP_MAPS.equals(slot)) return "¿Qué app de mapas usas?";
+        if (Prefs.APP_EQ.equals(slot)) return "¿Qué app es el ecualizador / sonido?";
+        return "Elige una app";
     }
 
-    private void fetchWeather(boolean force) {
-        long now = SystemClock.elapsedRealtime();
-        if (!force && lastWeatherFetch != 0 && now - lastWeatherFetch < WEATHER_EVERY_MS) return;
-        lastWeatherFetch = now;
-        Weather.fetch(this, this::showWeather);
+    private void doAction(String a) {
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (a.startsWith("pick:")) {
+            final String slot = a.substring(5);
+            Ui.pickApp(this, titleFor(slot), new Ui.AppChosen() {
+                public void onApp(String c) { Prefs.setApp(MainActivity.this, slot, c); }
+            });
+        } else if ("apps".equals(a)) {
+            startActivity(new Intent(this, AppsActivity.class));
+        } else if ("screenoff".equals(a)) {
+            startActivity(new Intent(this, ScreenOffActivity.class));
+        } else if ("settings".equals(a)) {
+            startActivity(new Intent(this, SettingsActivity.class));
+        } else if ("eq".equals(a)) {
+            Ui.openSlot(this, Prefs.APP_EQ, titleFor(Prefs.APP_EQ));
+        } else if (a.startsWith("navto:")) {
+            openMapsAt(a.substring(6));
+        } else if (a.startsWith("nav:")) {
+            navigateTo(a.substring(4));
+        } else if ("oil".equals(a)) {
+            startActivity(new Intent(this, OilActivity.class));
+        } else if ("prev".equals(a)) {
+            nowPlaying.skip(false);
+        } else if ("next".equals(a)) {
+            nowPlaying.skip(true);
+        } else if ("playpause".equals(a)) {
+            nowPlaying.playPause();
+        } else if ("openmusic".equals(a)) {
+            openMusic();
+        } else if ("volup".equals(a)) {
+            am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0);
+        } else if ("voldown".equals(a)) {
+            am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0);
+        }
     }
+
+    // ---------- Voice guidance ----------
+    private android.speech.tts.TextToSpeech navTts;
+    private boolean navTtsReady;
+    private String navPending;
+    private volatile String navVoiceName;
+
+    private void speakNav(String text) {
+        if (text == null || text.isEmpty() || !Prefs.get(this).getBoolean("nav_voice", true)) return;
+        if (navTts == null) {
+            navPending = text;
+            navTts = new android.speech.tts.TextToSpeech(getApplicationContext(), new android.speech.tts.TextToSpeech.OnInitListener() {
+                public void onInit(int status) {
+                    if (status != android.speech.tts.TextToSpeech.SUCCESS) return;
+                    Voice.pickAnySpanish(navTts);
+                    try {
+                        android.speech.tts.Voice v = navTts.getVoice();
+                        navVoiceName = v == null ? "" : v.getLocale().toString();
+                    } catch (Exception ignored) { }
+                    navTts.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                    navTtsReady = true;
+                    if (navPending != null) { navTts.speak(navPending, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "nav"); navPending = null; }
+                }
+            });
+            return;
+        }
+        if (navTtsReady) navTts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "nav");
+        else navPending = text;
+    }
+
+    /** "lat,lon,label": hand the destination over to Waze / Google Maps (the app chosen in Ajustes). */
+    private void openMapsAt(String v) {
+        String[] p = v.split(",", 3);
+        if (p.length < 2) return;
+        String label = p.length > 2 ? p[2] : "Destino";
+        Intent i = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("geo:" + p[0] + "," + p[1] + "?q=" + p[0] + "," + p[1]
+                + "(" + android.net.Uri.encode(label) + ")"));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String comp = Prefs.app(this, Prefs.APP_MAPS);
+        if (comp != null) {
+            android.content.ComponentName cn = android.content.ComponentName.unflattenFromString(comp);
+            if (cn != null) i.setPackage(cn.getPackageName());
+        }
+        try {
+            startActivity(i);
+        } catch (Exception e) {
+            i.setPackage(null);
+            try { startActivity(i); } catch (Exception ignored) { android.widget.Toast.makeText(this, "No hay app de mapas instalada", android.widget.Toast.LENGTH_SHORT).show(); }
+        }
+    }
+
+    /** Navigation to the saved Casa / Trabajo address in the chosen maps app (asks for it the first time). */
+    private void navigateTo(final String place) {
+        final String key = "addr_" + place;
+        String addr = Prefs.get(this).getString(key, "").trim();
+        if (addr.isEmpty()) {
+            Ui.askText(this, "home".equals(place) ? "Dirección de tu casa" : "Dirección de tu trabajo",
+                    "Ej: Calle 80 # 50-20, Barranquilla", "", android.text.InputType.TYPE_CLASS_TEXT
+                            | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS, new Ui.TextChosen() {
+                        public void onText(String s) {
+                            if (s.isEmpty()) return;
+                            Prefs.put(MainActivity.this, key, s);
+                            navigateTo(place);
+                        }
+                    });
+            return;
+        }
+        Intent i = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("geo:0,0?q=" + android.net.Uri.encode(addr)));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String comp = Prefs.app(this, Prefs.APP_MAPS);
+        if (comp != null) {
+            android.content.ComponentName cn = android.content.ComponentName.unflattenFromString(comp);
+            if (cn != null) i.setPackage(cn.getPackageName());
+        }
+        try {
+            startActivity(i);
+        } catch (Exception e) {
+            i.setPackage(null);
+            try {
+                startActivity(i);
+            } catch (Exception e2) {
+                android.widget.Toast.makeText(this, "No hay app de mapas instalada", android.widget.Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void openMusic() {
+        if (!NowPlaying.hasAccess(this)) {
+            SettingsActivity.openNotificationAccess(this);
+            return;
+        }
+        String pkg = nowPlaying.playingPackage();
+        Intent i = pkg == null ? null : getPackageManager().getLaunchIntentForPackage(pkg);
+        if (i != null) startActivity(i);
+        else Ui.openSlot(this, Prefs.APP_MUSIC, titleFor(Prefs.APP_MUSIC));
+    }
+
+    // ---------- GPS (speed and map) ----------
+
+    private void startGps() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+        try {
+            Location best = null;
+            for (String p : lm.getAllProviders()) {
+                Location l = lm.getLastKnownLocation(p);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            }
+            if (best != null) {
+                lat = best.getLatitude();
+                lon = best.getLongitude();
+                fix = true;
+            }
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, this);
+        } catch (Exception ignored) { }
+    }
+
+    @Override
+    public void onLocationChanged(Location l) {
+        lat = l.getLatitude();
+        lon = l.getLongitude();
+        fix = true;
+        speedKmh = l.hasSpeed() ? l.getSpeed() * 3.6 : 0;
+        if (speedKmh < 2) speedKmh = 0; // parked GPS jitter
+        if (l.hasBearing() && speedKmh > 3) bearing = l.getBearing();
+    }
+
+    public void onStatusChanged(String p, int s, Bundle b) { }
+    public void onProviderEnabled(String p) { }
+    public void onProviderDisabled(String p) { }
+
+    // ---------- Lifecycle ----------
 
     private final Runnable periodic = new Runnable() {
         public void run() {
-            updateGreeting();
-            fetchWeather(false);
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (lastWeatherFetch == 0 || now - lastWeatherFetch > WEATHER_EVERY_MS) {
+                lastWeatherFetch = now;
+                Weather.fetch(MainActivity.this, null);
+            }
             handler.postDelayed(this, 60 * 1000);
         }
     };
 
-    // ---------- Car lights (ILL wire) ----------
-
-    private final android.content.BroadcastReceiver illReceiver = new android.content.BroadcastReceiver() {
-        @Override
-        public void onReceive(android.content.Context c, Intent i) {
-            android.util.Log.d("CarLights", "ILL broadcast extras=" + i.getExtras());
-            showCarLights(i.getByteExtra("extra_ill_state", (byte) 0) != 0);
-        }
-    };
-
-    /** The kernel keeps the light state as bit 2 of mcu_no_source_device_state. */
-    private boolean carLightsOn() {
-        int state = android.provider.Settings.System.getInt(getContentResolver(), "mcu_no_source_device_state", 0);
-        return (state & 2) != 0;
-    }
-
-    private void showCarLights(boolean on) {
-        // Cross-fade between the "lights off" and "lights on" photos.
-        carLights.animate().alpha(on ? 1f : 0f).setDuration(600).start();
-        car.animate().alpha(on ? 0f : 1f).setDuration(600).start();
-    }
-
-    private void updateOil() {
-        if (!Odometer.isConfigured(this)) {
-            oilInfo.setText("Aceite: configurar");
-            oilBg.setColor(0x26FFFFFF);
-            return;
-        }
-        int left = Odometer.remainingKm(this);
-        oilInfo.setText(left < 0 ? "Aceite: ¡ya toca el cambio!" : "Aceite: faltan " + OilActivity.fmt(left) + " km");
-        oilBg.setColor(left < 0 ? 0xCCE53935 : left <= Odometer.WARN_KM ? 0xCCFF9800 : 0x26FFFFFF);
-    }
-
-    // ---------- Clock ----------
-
-    private View buildClockCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER);
-        card.setBackground(Ui.card(this));
-
-        TextClock time = new TextClock(this);
-        time.setFormat24Hour("HH:mm");
-        time.setFormat12Hour("hh:mm");
-        time.setTextSize(40);
-        time.setTextColor(Color.WHITE);
-        time.setTypeface(Typeface.DEFAULT_BOLD);
-        time.setIncludeFontPadding(false);
-        time.setGravity(Gravity.CENTER);
-        card.addView(time);
-
-        TextClock date = new TextClock(this);
-        date.setFormat24Hour("EEEE, d 'de' MMMM");
-        date.setFormat12Hour("EEEE, d 'de' MMMM");
-        date.setTextSize(14);
-        date.setTextColor(0xCCFFFFFF);
-        date.setPadding(0, dp(6), 0, 0);
-        date.setGravity(Gravity.CENTER);
-        card.addView(date);
-
-        // Oil-change status pill; opens the oil screen.
-        oilInfo = Ui.text(this, "", 13, Color.WHITE);
-        oilInfo.setPadding(dp(14), dp(6), dp(14), dp(6));
-        oilBg = new GradientDrawable();
-        oilBg.setCornerRadius(dp(14));
-        oilInfo.setBackground(oilBg);
-        Ui.pressable(oilInfo, 0.92f);
-        oilInfo.setOnClickListener(v -> startActivity(new Intent(this, OilActivity.class)));
-        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(-2, -2);
-        olp.topMargin = dp(8);
-        card.addView(oilInfo, olp);
-
-        Ui.pressable(card, 0.97f);
-        card.setOnClickListener(v -> Ui.launch(this, SETTINGS));
-        return card;
-    }
-
-    // ---------- FM ----------
-
-    private View buildFmCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER);
-        card.setBackground(Ui.card(this));
-
-        LinearLayout head = new LinearLayout(this);
-        head.setGravity(Gravity.CENTER);
-        ImageView radioIcon = new ImageView(this);
-        radioIcon.setImageResource(R.drawable.ic_radio);
-        radioIcon.setColorFilter(0xFFFF9F5A);
-        head.addView(radioIcon, new LinearLayout.LayoutParams(dp(22), dp(22)));
-        fmBand = Ui.text(this, "RADIO FM", 15, Color.WHITE);
-        fmBand.setPadding(dp(8), 0, 0, 0);
-        head.addView(fmBand);
-        card.addView(head);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        row.addView(Ui.iconButton(this, R.drawable.ic_prev, 52, false, () -> stationStep(false)),
-                new LinearLayout.LayoutParams(dp(52), dp(52)));
-        fmFreq = Ui.text(this, "--.-", 50, Color.WHITE);
-        fmFreq.setTypeface(Typeface.DEFAULT_BOLD);
-        row.addView(fmFreq, new LinearLayout.LayoutParams(0, -2, 1f));
-        row.addView(Ui.iconButton(this, R.drawable.ic_next, 52, false, () -> stationStep(true)),
-                new LinearLayout.LayoutParams(dp(52), dp(52)));
-        row.setPadding(dp(12), dp(10), dp(12), 0);
-        card.addView(row, new LinearLayout.LayoutParams(-1, -2));
-
-        fmUnit = Ui.text(this, "MHz", 15, 0x99FFFFFF);
-        card.addView(fmUnit);
-
-        Ui.pressable(card, 0.97f);
-        card.setOnClickListener(v -> startActivity(new Intent(this, RadioActivity.class)));
-        return card;
-    }
-
-    private void stationStep(boolean next) {
-        radio.preset(next);
-        handler.postDelayed(this::updateRadio, 300);
-    }
-
-    private void updateRadio() {
-        RadioClient.Station st = radio.current();
-        if (st == null) return;
-        fmBand.setText(st.psName.isEmpty() ? "RADIO " + st.bandLabel() : st.bandLabel() + " · " + st.psName);
-        fmFreq.setText(st.frequencyLabel());
-        fmUnit.setText(st.isAm() ? "kHz" : "MHz");
-    }
-
-    private final Runnable radioPoll = new Runnable() {
-        public void run() {
-            updateRadio();
-            handler.postDelayed(this, 1000);
-        }
-    };
-
-    // ---------- Music (any source) ----------
-
-    private View buildMusicCard() {
-        FrameLayout card = new FrameLayout(this);
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0xFF6A3BFF, 0xFFC04DE8, 0xFF2B1A7A});
-        bg.setCornerRadius(dp(18));
-        card.setBackground(bg);
-        card.setClipToOutline(true);
-
-        art = new ImageView(this);
-        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        card.addView(art, new FrameLayout.LayoutParams(-1, -1));
-
-        View shade = new View(this);
-        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x33000000, 0x00000000, 0xCC100A30}));
-        card.addView(shade, new FrameLayout.LayoutParams(-1, -1));
-
-        songSource = Ui.text(this, "MÚSICA", 12, Color.WHITE);
-        songSource.setLetterSpacing(0.1f);
-        songSource.setPadding(dp(12), dp(5), dp(12), dp(5));
-        GradientDrawable chip = new GradientDrawable();
-        chip.setColor(0x40000000);
-        chip.setCornerRadius(dp(14));
-        songSource.setBackground(chip);
-        FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
-        slp.setMargins(dp(14), dp(14), 0, 0);
-        card.addView(songSource, slp);
-
-        LinearLayout bottom = new LinearLayout(this);
-        bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setPadding(dp(16), 0, dp(16), dp(18));
-        songTitle = Ui.text(this, "", 21, Color.WHITE);
-        songTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        bottom.addView(songTitle);
-        songArtist = Ui.text(this, "", 15, 0xCCFFFFFF);
-        songArtist.setPadding(0, dp(2), 0, dp(14));
-        bottom.addView(songArtist);
-
-        LinearLayout controls = new LinearLayout(this);
-        controls.setGravity(Gravity.CENTER);
-        controls.addView(Ui.iconButton(this, R.drawable.ic_prev, 50, false, () -> nowPlaying.skip(false)),
-                new LinearLayout.LayoutParams(dp(50), dp(50)));
-        playBtn = Ui.iconButton(this, R.drawable.ic_play, 66, true, () -> nowPlaying.playPause());
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(66), dp(66));
-        plp.setMargins(dp(18), 0, dp(18), 0);
-        controls.addView(playBtn, plp);
-        controls.addView(Ui.iconButton(this, R.drawable.ic_next, 50, false, () -> nowPlaying.skip(true)),
-                new LinearLayout.LayoutParams(dp(50), dp(50)));
-        bottom.addView(controls);
-        card.addView(bottom, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
-
-        Ui.pressable(card, 0.98f);
-        card.setOnClickListener(v -> nowPlaying.open(this));
-        return card;
-    }
-
-    @Override
-    public void onNowPlayingChanged() {
-        NowPlaying.Source s = nowPlaying.current();
-        NowPlaying.Track t = s == null ? null : nowPlaying.track(s);
-        boolean empty = t == null || t.title.isEmpty();
-        songSource.setText(s == null ? "MÚSICA" : nowPlaying.label(s).toUpperCase());
-        songTitle.setText(empty ? "Nada sonando" : t.title);
-        songArtist.setText(empty ? "Toca para abrir la música" : t.artist);
-        playBtn.setImageResource(t != null && t.playing ? R.drawable.ic_pause : R.drawable.ic_play);
-
-        if (t != null && t.art != null) {
-            art.setPadding(0, 0, 0, 0);
-            art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            art.clearColorFilter();
-            art.setAlpha(1f);
-            art.setImageBitmap(t.art);
-        } else {
-            art.setPadding(dp(80), dp(56), dp(80), dp(170));
-            art.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            art.setImageResource(s == NowPlaying.Source.BT ? R.drawable.ic_bluetooth : R.drawable.ic_music);
-            art.setColorFilter(Color.WHITE);
-            art.setAlpha(0.25f);
-        }
-    }
-
-    // ---------- Dock ----------
-
-    private View buildDock() {
-        LinearLayout dock = new LinearLayout(this);
-        dock.setGravity(Gravity.CENTER_VERTICAL);
-        dock.addView(dockIcon(R.drawable.ic_compass, () -> Ui.launch(this, MAPS)), weight(1f, 0));
-        dock.addView(dockIcon(R.drawable.ic_bluetooth,
-                () -> startActivity(new Intent(this, BtActivity.class))), weight(1f, 0));
-        dock.addView(dockIcon(R.drawable.ic_radio,
-                () -> startActivity(new Intent(this, RadioActivity.class))), weight(1f, 0));
-
-        FrameLayout center = new FrameLayout(this);
-        RingView ring = new RingView(this);
-        center.addView(ring, new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER));
-        Ui.pressable(ring, 0.88f);
-        ring.setOnClickListener(v -> startActivity(new Intent(this, AppsActivity.class)));
-        dock.addView(center, weight(1f, 0));
-
-        dock.addView(dockIcon(R.drawable.ic_w_moon,
-                () -> startActivity(new Intent(this, ScreenOffActivity.class))), weight(1f, 0));
-        dock.addView(dockIcon(R.drawable.ic_settings, () -> Ui.launch(this, EQ)), weight(1f, 0));
-        dock.addView(dockIcon(R.drawable.ic_gear, () -> Ui.launch(this, SETTINGS)), weight(1f, 0));
-        return dock;
-    }
-
-    private View dockIcon(int icon, Runnable action) {
-        FrameLayout f = new FrameLayout(this);
-        ImageView iv = new ImageView(this);
-        iv.setImageResource(icon);
-        iv.setColorFilter(0xE6FFFFFF);
-        iv.setPadding(dp(12), dp(12), dp(12), dp(12));
-        f.addView(iv, new FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER));
-        Ui.pressable(iv, 0.85f);
-        iv.setOnClickListener(v -> action.run());
-        return f;
-    }
-
-    // ---------- Lifecycle & helpers ----------
-
     @Override
     protected void onResume() {
         super.onResume();
-        updateGreeting();
-        updateOil();
-        showWeather(Weather.cached(this));
-        registerReceiver(illReceiver, new android.content.IntentFilter("com.nwd.ACTION_ILL_STATE_CHANGE"));
-        boolean lights = carLightsOn();
-        android.util.Log.d("CarLights", "onResume lights=" + lights);
-        carLights.setAlpha(lights ? 1f : 0f);
-        car.setAlpha(lights ? 0f : 1f);
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        web.onResume();
+        if (!askedLocation
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            askedLocation = true;
             requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
         }
+        startGps();
         handler.post(periodic);
-        handler.post(radioPoll);
-        nowPlaying.addListener(this);
-        onNowPlayingChanged();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        unregisterReceiver(illReceiver);
+        web.onPause();
+        lm.removeUpdates(this);
         handler.removeCallbacks(periodic);
-        handler.removeCallbacks(radioPoll);
-        nowPlaying.removeListener(this);
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
-        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) fetchWeather(true);
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            CarService.start(this);
+            startGps();
+            lastWeatherFetch = 0;
+            handler.post(periodic);
+        }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        radio.unbind(this);
-    }
-
-    private TextView left(TextView tv) {
-        tv.setGravity(Gravity.START);
-        return tv;
-    }
-
-    private LinearLayout.LayoutParams weight(float w, int left) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, w);
-        lp.leftMargin = left;
-        return lp;
-    }
-
-    private LinearLayout.LayoutParams vweight(float w, int top) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, 0, w);
-        lp.topMargin = top;
-        return lp;
-    }
-
-    private int dp(int v) {
-        return Ui.dp(this, v);
+        if (navTts != null) navTts.shutdown();
+        web.destroy();
     }
 
     static void pressable(View v) {
@@ -512,4 +567,5 @@ public class MainActivity extends Activity implements NowPlaying.Listener {
     public void onBackPressed() {
         // Home screen: nothing to go back to.
     }
+
 }

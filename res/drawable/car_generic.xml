@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generic hatchback, side view. Users can replace it with a photo of their own car in Ajustes. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="100dp"
+    android:viewportWidth="240"
+    android:viewportHeight="100">
+
+    <!-- shadow -->
+    <path
+        android:fillColor="#40000000"
+        android:pathData="M30,92 A92,5 0 1,0 214,92 A92,5 0 1,0 30,92 Z" />
+
+    <!-- body -->
+    <path
+        android:fillColor="#DDE3F0"
+        android:pathData="M10,70 L10,58 Q12,50 30,47 L62,44 L88,26 Q94,22 104,22 L160,22 Q172,22 180,30 L200,46 Q226,48 232,56 L232,70 Q232,74 228,74 L206,74 A22,22 0 0,0 162,74 L82,74 A22,22 0 0,0 38,74 L14,74 Q10,74 10,70 Z" />
+
+    <!-- lower trim -->
+    <path
+        android:fillColor="#B4BDD2"
+        android:pathData="M10,64 L38,64 L38,74 L14,74 Q10,74 10,70 Z M82,64 L162,64 L162,74 L82,74 Z M206,64 L232,64 L232,70 Q232,74 228,74 L206,74 Z" />
+
+    <!-- windows -->
+    <path
+        android:fillColor="#34406E"
+        android:pathData="M70,44 L91,29 Q95,27 101,27 L127,27 L127,44 Z M133,27 L158,27 Q167,27 173,33 L186,44 L133,44 Z" />
+
+    <!-- door line and handle -->
+    <path
+        android:strokeColor="#9AA4BC"
+        android:strokeWidth="1.2"
+        android:pathData="M130,44 L130,64 M100,50 L110,50 M150,50 L160,50" />
+
+    <!-- lights -->
+    <path
+        android:fillColor="#FFF4C2"
+        android:pathData="M12,57 L27,55 L25,61 L12,62 Z" />
+    <path
+        android:fillColor="#FF4D5E"
+        android:pathData="M225,51 L232,54 L232,61 L225,60 Z" />
+
+    <!-- wheels -->
+    <path
+        android:fillColor="#15151F"
+        android:pathData="M43,74 A17,17 0 1,0 77,74 A17,17 0 1,0 43,74 Z M167,74 A17,17 0 1,0 201,74 A17,17 0 1,0 167,74 Z" />
+    <path
+        android:fillColor="#B8C0D0"
+        android:pathData="M51,74 A9,9 0 1,0 69,74 A9,9 0 1,0 51,74 Z M175,74 A9,9 0 1,0 193,74 A9,9 0 1,0 175,74 Z" />
+</vector>

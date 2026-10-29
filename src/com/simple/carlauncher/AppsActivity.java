@@ -52,7 +52,7 @@ public class AppsActivity extends Activity {
         circle.setColor(0x1FFFFFFF);
         back.setBackground(circle);
         MainActivity.pressable(back);
-        back.setOnClickListener(v -> finish());
+        back.setOnClickListener(Ui.click(new Runnable() { public void run() { finish(); } }));
         header.addView(back, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
         TextView title = new TextView(this);
@@ -78,20 +78,24 @@ public class AppsActivity extends Activity {
             }
         };
         grid.setAdapter(adapter);
-        grid.setOnItemClickListener((parent, view, pos, id) -> {
+        grid.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            public void onItemClick(android.widget.AdapterView<?> parent, View view, int pos, long id) {
             ResolveInfo ri = apps.get(pos);
             Intent i = new Intent(Intent.ACTION_MAIN);
             i.addCategory(Intent.CATEGORY_LAUNCHER);
             i.setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             startActivity(i);
+            }
         });
-        grid.setOnItemLongClickListener((parent, view, pos, id) -> {
+        grid.setOnItemLongClickListener(new android.widget.AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(android.widget.AdapterView<?> parent, View view, int pos, long id) {
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + apps.get(pos).activityInfo.packageName));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
             return true;
+            }
         });
         root.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -108,8 +112,11 @@ public class AppsActivity extends Activity {
             if (!ri.activityInfo.packageName.equals(getPackageName())) apps.add(ri);
         }
         Collator collator = Collator.getInstance();
-        Collections.sort(apps, (a, b) -> collator.compare(
-                a.loadLabel(pm).toString(), b.loadLabel(pm).toString()));
+        Collections.sort(apps, new java.util.Comparator<ResolveInfo>() {
+            public int compare(ResolveInfo a, ResolveInfo b) {
+                return collator.compare(a.loadLabel(pm).toString(), b.loadLabel(pm).toString());
+            }
+        });
         adapter.notifyDataSetChanged();
     }
 

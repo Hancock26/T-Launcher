@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>T-Launcher · Tu carro</title>
+<meta name="description" content="Convierte un modelo 3D de tu carro (Sketchfab) en el paquete de imágenes de T-Launcher.">
+<link rel="icon" href="../icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+/* Layout: a narrow workshop column of numbered steps beside a large "garage" preview that shows exactly what the radio will show. */
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #14161b; --muted: #5d6472; --line: #d7dbe2;
+  --accent: #3e6ae1; --signal: #e82127; --ok: #1f9d55; --stage: #e4e7ec;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b0c0f; --panel: #16181d; --ink: #eef0f4; --muted: #9aa1ae; --line: #2a2e36; --accent: #6b8ff0; --stage: #050608; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #0b0c0f; --panel: #16181d; --ink: #eef0f4; --muted: #9aa1ae; --line: #2a2e36; --accent: #6b8ff0; --stage: #050608; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 40px; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 20px; }
+header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+header img { width: 48px; height: 48px; border-radius: 12px; }
+h1 { font: 700 clamp(26px, 4vw, 38px)/1.05 var(--display); letter-spacing: .01em; margin: 0; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); flex-basis: 100%; max-width: 70ch; }
+.grid { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.steps { display: grid; gap: 14px; }
+.step { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.step h2 { font: 600 19px/1.2 var(--display); margin: 0; display: flex; gap: 10px; align-items: baseline; }
+.step h2 b { font: 600 12px var(--mono); color: var(--accent); letter-spacing: .06em; }
+.step p, .hint { margin: 0; color: var(--muted); font-size: 14px; }
+label { font-size: 13px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); display: grid; gap: 6px; }
+input[type=number], input[type=text], select { font: 500 15px var(--body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; }
+input[type=color] { width: 54px; height: 38px; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px; }
+.row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.row > * { flex: 1 1 120px; min-width: 0; }
+button, .file { font: 600 15px var(--body); border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 10px 14px; cursor: pointer; text-align: center; }
+button:hover, .file:hover { border-color: var(--accent); }
+button:focus-visible, .file:focus-within, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file { position: relative; display: block; border-style: dashed; padding: 18px 14px; }
+.status { font: 400 13px var(--mono); color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+.status.ok { color: var(--ok); } .status.err { color: var(--signal); }
+.stage { background: var(--stage); border-radius: 12px; border: 1px solid var(--line); overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+.stage .bar { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--panel); }
+.stage .bar button { padding: 6px 12px; font-size: 14px; }
+.stage .bar button[aria-pressed=true] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+#view { width: 100%; aspect-ratio: 16 / 10; display: block; max-width: 100%; }
+.outs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.out { background: var(--stage); border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
+.out img { width: 100%; height: 130px; object-fit: contain; }
+.out span { font: 400 11px var(--mono); color: var(--muted); }
+.credit { font-size: 13px; color: var(--muted); max-width: 75ch; }
+.credit a { color: var(--accent); }
+code { font: 400 13px var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="../icon.png" alt="">
+    <h1>Pon tu carro en T-Launcher</h1>
+    <p>Sube el modelo 3D de tu carro descargado de Sketchfab, elige el color y descarga el paquete <code>.zip</code>. En el radio: Ajustes › Importar paquete. Todo se hace en tu navegador; el modelo no se sube a ningún servidor.</p>
+  </header>
+
+  <div class="grid">
+    <div class="steps">
+      <section class="step">
+        <h2><b>PASO 1</b> Modelo 3D</h2>
+        <p>En <a href="https://sketchfab.com/search?features=downloadable&q=chevrolet+spark&type=models" target="_blank" rel="noopener">Sketchfab</a> busca tu carro, filtra por <em>Downloadable</em> y baja el formato <strong>glTF</strong> (.zip) o <strong>GLB</strong>.</p>
+        <label class="file" for="file">Elegir el .zip o .glb del modelo
+          <input id="file" type="file" accept=".zip,.glb,.gltf">
+        </label>
+        <button id="sample" type="button">Probar con un carro de ejemplo</button>
+        <div class="status" id="st1">Sin modelo cargado.</div>
+      </section>
+
+      <section class="step">
+        <h2><b>PASO 2</b> Ajustes</h2>
+        <div class="row">
+          <label for="len">Largo real (m)<input id="len" type="number" step="0.01" min="2.5" max="6.5" value="3.64"></label>
+          <label for="paint">Color<input id="paint" type="color" value="#8b847d"></label>
+        </div>
+        <label for="mat">Material de la carrocería<select id="mat"><option>—</option></select></label>
+        <div class="row">
+          <button id="flip" type="button">Girar 180°</button>
+          <button id="rot" type="button">Girar 90°</button>
+        </div>
+        <p class="hint">En la vista <strong>Atrás</strong> debes ver la parte trasera (las luces rojas). Si ves el frente, toca “Girar 180°”. Si ves el lado, “Girar 90°”.</p>
+        <label for="credit">Créditos del modelo (autor y licencia)<input id="credit" type="text" placeholder="Ej: “2012 Chevrolet Spark GT” de Ddiaz Design, CC BY-NC-SA 4.0"></label>
+      </section>
+
+      <section class="step">
+        <h2><b>PASO 3</b> Paquete</h2>
+        <button class="primary" id="make" type="button" disabled>Crear y descargar paquete</button>
+        <div class="status" id="st3"></div>
+        <div class="outs" id="outs"></div>
+      </section>
+    </div>
+
+    <div class="stage">
+      <div class="bar" role="group" aria-label="Vista">
+        <button type="button" data-v="chase" aria-pressed="true">Atrás (conducción)</button>
+        <button type="button" data-v="studio" aria-pressed="false">Inicio</button>
+        <button type="button" data-v="top" aria-pressed="false">Arriba</button>
+        <button type="button" id="lightsBtn" aria-pressed="false">Luces</button>
+      </div>
+      <canvas id="view" width="1280" height="800"></canvas>
+    </div>
+  </div>
+
+  <p class="credit">Respeta la licencia de cada modelo: muchos son de uso personal y no comercial y exigen nombrar al autor (CC BY / CC BY-NC). El paquete incluye un <code>LEEME.txt</code> con los créditos. Hecho para <a href="../">T-Launcher</a> de Jesus Torregroza, basado en CleanLauncher de Jhon Jairo.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ---- Camera standards shared with the launcher (do not change: the app expects them) ----
+// Drive view: camera 8 m high, 10 m behind the rear bumper, looking level. 334 px per metre at the bumper.
+// Crop: 2.3 m wide, from 3.6 m above to 0.15 m below the bumper's contact point.
+const CH = { camH: 8, zCar: 10, pxm: 334, wM: 2.3, upM: 3.6, downM: 0.15 };
+
+const $ = id => document.getElementById(id);
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas: view, antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(3, 8, 5); scene.add(sun);
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(1, 10, 1); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 8; key.shadow.blurSamples = 20;
+Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 30 }); scene.add(key); scene.add(key.target);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.32 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = 0.001; floor.receiveShadow = true; scene.add(floor);
+
+let holder = null, car = null, rotY = 0, lightsOn = false, curView = 'chase', mats = [], bodyMat = null, lights = { head: [], tail: [] }, extra = [];
+
+// ---------------- loading ----------------
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  status('st1', 'Cargando ' + f.name + '…');
+  try {
+    let url, map = {};
+    if (/\.zip$/i.test(f.name)) {
+      const zip = await JSZip.loadAsync(f);
+      let main = null;
+      for (const name of Object.keys(zip.files)) {
+        const z = zip.files[name]; if (z.dir) continue;
+        const blob = await z.async('blob');
+        const u = URL.createObjectURL(blob);
+        map[name.split('/').pop()] = u; map[name] = u;
+        if (/\.(gltf|glb)$/i.test(name) && (!main || /scene\.gltf$/i.test(name))) main = name;
+      }
+      if (!main) throw new Error('El .zip no trae un archivo .gltf o .glb');
+      url = map[main];
+    } else url = URL.createObjectURL(f);
+    const mgr = new THREE.LoadingManager();
+    const own = new Set(Object.values(map));
+    mgr.setURLModifier(u => { if (own.has(u) || /^data:/.test(u)) return u; const n = decodeURIComponent(u.split('/').pop().split('?')[0]); return map[n] || u; });
+    const g = await new GLTFLoader(mgr).loadAsync(url);
+    useModel(g.scene, f.name.replace(/\.(zip|glb|gltf)$/i, ''));
+  } catch (err) { status('st1', 'No se pudo leer el modelo: ' + err.message, 'err'); }
+});
+$('sample').addEventListener('click', () => useModel(sampleCar(), 'Carro de ejemplo'));
+
+function useModel(obj, name) {
+  if (holder) scene.remove(holder);
+  holder = new THREE.Group(); car = obj; holder.add(car); scene.add(holder);
+  rotY = 0; car.rotation.set(0, 0, 0);
+  const cl = new Map(), one = m => { if (!cl.has(m)) cl.set(m, m.clone()); return cl.get(m); };
+  car.traverse(o => { if (o.isMesh) { o.castShadow = true; o.material = Array.isArray(o.material) ? o.material.map(one) : one(o.material); } });
+  orient(); collectMats(); detectLights(); applyPaint();
+  status('st1', name + ' · ' + countMeshes() + ' piezas · luces: ' + lights.head.length + ' delanteras, ' + lights.tail.length + ' traseras', 'ok');
+  $('make').disabled = false; draw();
+}
+function countMeshes() { let n = 0; car.traverse(o => { if (o.isMesh) n++; }); return n; }
+
+// Scale to the real length, put it on the floor, centred, with its longest side along Z.
+function orient() {
+  car.rotation.y = rotY; car.scale.setScalar(1); car.position.set(0, 0, 0); car.updateMatrixWorld(true);
+  let b = new THREE.Box3().setFromObject(car), s = b.getSize(new THREE.Vector3());
+  if (s.x > s.z) { car.rotation.y = rotY + Math.PI / 2; car.updateMatrixWorld(true); b = new THREE.Box3().setFromObject(car); s = b.getSize(new THREE.Vector3()); }
+  const k = (+$('len').value || 3.64) / s.z; car.scale.setScalar(k); car.updateMatrixWorld(true);
+  b = new THREE.Box3().setFromObject(car); const c = b.getCenter(new THREE.Vector3());
+  car.position.set(-c.x, -b.min.y, -c.z); car.updateMatrixWorld(true);
+}
+$('len').addEventListener('change', () => { if (car) { orient(); detectLights(); draw(); } });
+$('flip').addEventListener('click', () => { if (!car) return; rotY += Math.PI; orient(); detectLights(); draw(); });
+$('rot').addEventListener('click', () => { if (!car) return; rotY += Math.PI / 2; orient(); detectLights(); draw(); });
+
+// Body paint: the material whose name says so, otherwise the one covering the most surface.
+function collectMats() {
+  const area = new Map();
+  car.traverse(o => { if (!o.isMesh) return; const s = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3());
+    [].concat(o.material).forEach(m => area.set(m, (area.get(m) || 0) + s.x * s.y + s.y * s.z + s.x * s.z)); });
+  mats = [...area.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  const byName = mats.find(m => /paint|carroc|body|exterior|carpaint|car_paint|pintura/i.test(m.name) && !/glass|vidrio|window/i.test(m.name));
+  const big = mats.find(m => !m.transparent && !/glass|tire|tyre|rubber|llanta|interior|black/i.test(m.name));
+  bodyMat = byName || big || mats[0];
+  mats.forEach(m => { m.userData.orig = m.userData.orig || (m.color ? m.color.clone() : null); });
+  $('mat').innerHTML = mats.slice(0, 40).map((m, i) => '<option value="' + i + '"' + (m === bodyMat ? ' selected' : '') + '>' + (m.name || 'material ' + (i + 1)) + '</option>').join('');
+}
+$('mat').addEventListener('change', () => { if (bodyMat) sameAs(bodyMat).forEach(m => { if (m.userData.orig) m.color.copy(m.userData.orig); }); bodyMat = mats[+$('mat').value]; applyPaint(); draw(); });
+$('paint').addEventListener('input', () => { applyPaint(); draw(); });
+function sameAs(m) { return mats.filter(x => x === m || (m.name && x.name === m.name)); }
+function applyPaint() { if (!bodyMat || !bodyMat.color) return; sameAs(bodyMat).forEach(m => { if (!m.color) return; m.color.set($('paint').value); if ('metalness' in m) { m.metalness = 0.6; m.roughness = 0.32; } }); }
+
+// Lights: meshes named like lamps, sorted into front (white) and back (red) by where they sit.
+function detectLights() {
+  lights = { head: [], tail: [] };
+  const b = new THREE.Box3().setFromObject(car), half = (b.max.z - b.min.z) / 2;
+  car.traverse(o => {
+    if (!o.isMesh) return;
+    const n = (o.name + ' ' + [].concat(o.material).map(m => m.name).join(' ')).toLowerCase();
+    if (!/light|lamp|lens|faro|luz|stop|brake|tail|head|blinker|indicator|signal|calavera/.test(n) || /interior|plate|placa|dash/.test(n)) return;
+    const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), along = c.z / half;
+    if (along > 0.6 && !/tail|brake|stop|rear/.test(n)) lights.head.push(o);
+    else if (along < -0.6 || /tail|brake|stop|rear/.test(n)) lights.tail.push(o);
+  });
+}
+function setLights(on) {
+  const set = (list, col, k) => list.forEach(o => [].concat(o.material).forEach(m => { if (!m.emissive) return;
+    if (!m.userData.e) m.userData.e = { c: m.emissive.clone(), i: m.emissiveIntensity };
+    if (on) { m.emissive.set(col); m.emissiveIntensity = k; } else { m.emissive.copy(m.userData.e.c); m.emissiveIntensity = m.userData.e.i; } }));
+  set(lights.head, 0xfff6e0, 2.5); set(lights.tail, 0xff1020, 3.5);
+}
+
+// ---------------- cameras ----------------
+const FWD = new THREE.Vector3(0, 0, 1), UP = new THREE.Vector3(0, 1, 0);
+function rearPoint() { const b = new THREE.Box3().setFromObject(car); return new THREE.Vector3(0, 0, b.min.z); }
+function camChase(w, h, scale) {
+  // Level camera with a shifted lens, so the picture matches the launcher's road drawing exactly.
+  const pxm = CH.pxm * scale, f = pxm * CH.zCar, F = 12000 * scale;
+  const cam = new THREE.PerspectiveCamera(2 * Math.atan(F / 2 / f) * 180 / Math.PI, 1, 0.1, 400);
+  const r = rearPoint(); cam.position.set(0, CH.camH, r.z - CH.zCar); cam.lookAt(cam.position.clone().add(FWD));
+  const gx = F / 2, gy = F / 2 + CH.camH * f / CH.zCar;
+  cam.setViewOffset(F, F, gx - (CH.wM * pxm) / 2, gy - CH.upM * pxm, w, h); cam.updateProjectionMatrix();
+  return cam;
+}
+function camStudio(aspect) {
+  const L = +$('len').value || 3.64, b = new THREE.Box3().setFromObject(car), h = b.max.y;
+  const cam = new THREE.PerspectiveCamera(22, aspect, 0.1, 400);
+  const left = new THREE.Vector3(1, 0, 0);
+  const dir = left.multiplyScalar(0.80).add(FWD.clone().multiplyScalar(0.58)).add(new THREE.Vector3(0, 0.16, 0)).normalize();
+  cam.position.copy(dir.multiplyScalar(12.5 * L / 3.64)); cam.lookAt(0, h * 0.42, 0); return cam;
+}
+function camTop(aspect) {
+  const L = +$('len').value || 3.64, cam = new THREE.PerspectiveCamera(20, aspect, 0.1, 400);
+  cam.position.set(0, 16 * L / 3.64, -0.0001); cam.up.copy(FWD); cam.lookAt(0, 0, 0); return cam;
+}
+
+// ---------------- preview ----------------
+document.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', () => {
+  curView = b.dataset.v; document.querySelectorAll('[data-v]').forEach(x => x.setAttribute('aria-pressed', x === b)); draw(); }));
+$('lightsBtn').addEventListener('click', e => { lightsOn = !lightsOn; e.currentTarget.setAttribute('aria-pressed', lightsOn); draw(); });
+function draw() {
+  const W = view.width, H = view.height;
+  renderer.setSize(W, H, false);
+  if (!car) { renderer.clear(); return; }
+  setLights(lightsOn);
+  let cam;
+  if (curView === 'chase') { // fit the standard crop into the preview
+    const sc = Math.min(H / ((CH.upM + CH.downM) * CH.pxm), W / (CH.wM * CH.pxm)) * 0.95;
+    const w = Math.round(CH.wM * CH.pxm * sc), h = Math.round((CH.upM + CH.downM) * CH.pxm * sc);
+    cam = camChase(w, h, sc); cam.clearViewOffset();
+    // centre the crop in the preview canvas
+    const pxm = CH.pxm * sc, f = pxm * CH.zCar, F = 12000 * sc, gx = F / 2, gy = F / 2 + CH.camH * f / CH.zCar;
+    cam.setViewOffset(F, F, gx - W / 2, gy - CH.upM * pxm - (H - h) / 2, W, H); cam.aspect = 1; cam.updateProjectionMatrix();
+  } else cam = curView === 'studio' ? camStudio(W / H) : camTop(W / H);
+  renderer.render(scene, cam);
+  setLights(false);
+}
+new ResizeObserver(() => { const r = view.getBoundingClientRect(); view.width = Math.round(r.width * Math.min(2, devicePixelRatio)); view.height = Math.round(r.height * Math.min(2, devicePixelRatio)); draw(); }).observe(view);
+
+// ---------------- package ----------------
+function shot(cam, w, h, on) {
+  renderer.setSize(w, h, false); setLights(on); renderer.render(scene, cam); setLights(false);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(view, 0, 0); return c;
+}
+// Glow where the lit picture is brighter; if the model has no lamp meshes, soft glows at typical lamp positions.
+function glow(off, on, cam, kind) {
+  const w = off.width, h = off.height, a = off.getContext('2d').getImageData(0, 0, w, h).data, bctx = on.getContext('2d'), b = bctx.getImageData(0, 0, w, h);
+  const d = document.createElement('canvas'); d.width = w; d.height = h; const dc = d.getContext('2d'), di = dc.createImageData(w, h);
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    const dr = b.data[i] - a[i], dg = b.data[i + 1] - a[i + 1], db = b.data[i + 2] - a[i + 2];
+    if (dr + dg + db > 120) { di.data[i] = b.data[i]; di.data[i + 1] = b.data[i + 1]; di.data[i + 2] = b.data[i + 2]; di.data[i + 3] = 255; n++; }
+  }
+  dc.putImageData(di, 0, 0);
+  if (n < 30) { // no lamp meshes found
+    const bx = new THREE.Box3().setFromObject(car), wd = (bx.max.x - bx.min.x) / 2 * 0.78;
+    const pts = kind === 'tail' ? [[-wd, 0.85, bx.min.z + 0.05], [wd, 0.85, bx.min.z + 0.05]] : [[-wd, 0.7, bx.max.z - 0.05], [wd, 0.7, bx.max.z - 0.05]];
+    pts.forEach(p => { const v = new THREE.Vector3(...p).project(cam), x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h, r = w * 0.035;
+      const g = dc.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, kind === 'tail' ? 'rgba(255,40,40,1)' : 'rgba(255,248,225,1)'); g.addColorStop(1, 'rgba(255,40,40,0)');
+      dc.fillStyle = g; dc.beginPath(); dc.arc(x, y, r, 0, 7); dc.fill(); });
+  }
+  bctx.save(); bctx.globalCompositeOperation = 'lighter';
+  [[w * 0.045, 0.9], [w * 0.015, 1]].forEach(([r, al]) => { bctx.filter = 'blur(' + r + 'px)'; bctx.globalAlpha = al; bctx.drawImage(d, 0, 0); });
+  bctx.restore();
+  return on;
+}
+function trim(c, pad) { // crop to the visible pixels
+  const ctx = c.getContext('2d'), { width: w, height: h } = c, data = ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (data[(y * w + x) * 4 + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < x0) return c;
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+  const o = document.createElement('canvas'); o.width = x1 - x0 + 1; o.height = y1 - y0 + 1; o.getContext('2d').drawImage(c, -x0, -y0); return o;
+}
+function scaleTo(c, w) { const o = document.createElement('canvas'); o.width = w; o.height = Math.round(c.height * w / c.width); const x = o.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(c, 0, 0, o.width, o.height); return o; }
+const blobOf = c => new Promise(r => c.toBlob(r, 'image/png'));
+
+$('make').addEventListener('click', async () => {
+  if (!car) return;
+  $('make').disabled = true; status('st3', 'Creando las imágenes…');
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const files = {};
+    // 1) drive view (exact standard crop), rendered at 2x then halved
+    const cw = Math.round(CH.wM * CH.pxm), chh = Math.round((CH.upM + CH.downM) * CH.pxm), cc = camChase(cw, chh, 1);
+    const c0 = shot(cc, cw, chh, false), c1 = glow(c0, shot(cc, cw, chh, true), cc, 'tail');
+    files['car_chase.png'] = scaleTo(c0, Math.round(cw / 2)); files['car_chase_lit.png'] = scaleTo(c1, Math.round(cw / 2));
+    // 2) home screen (three-quarter view)
+    const sc = camStudio(1600 / 700), s0 = shot(sc, 1600, 700, false), s1 = glow(s0, shot(sc, 1600, 700, true), sc, 'head');
+    files['car.png'] = trim(s0, 12); files['car_lit.png'] = trim(s1, 12);
+    // 3) from above
+    const tc = camTop(800 / 1300), t0 = shot(tc, 800, 1300, false), t1 = glow(t0, shot(tc, 800, 1300, true), tc, 'tail');
+    files['car_top.png'] = trim(t0, 8); files['car_top_lit.png'] = trim(t1, 8);
+    const zip = new JSZip(), outs = [];
+    for (const [n, c] of Object.entries(files)) { zip.file(n, await blobOf(c)); outs.push('<div class="out"><img alt="' + n + '" src="' + c.toDataURL() + '"><span>' + n + '</span></div>'); }
+    zip.file('LEEME.txt', 'Paquete de carro para T-Launcher\n\nEn el radio: Ajustes > Importar paquete del carro > elige este .zip.\n\nCréditos del modelo 3D: ' + ($('credit').value || '(escribe aquí el autor y la licencia del modelo)') +
+      '\nCreado con el generador de T-Launcher, de Jesus Torregroza (basado en CleanLauncher de Jhon Jairo).\n');
+    $('outs').innerHTML = outs.join('');
+    const blob = await zip.generateAsync({ type: 'blob' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 't-launcher-carro.zip'; document.body.appendChild(a); a.click(); a.remove();
+    status('st3', 'Listo: t-launcher-carro.zip (' + Math.round(blob.size / 1024) + ' KB). Cópialo al radio e impórtalo en Ajustes.', 'ok');
+    window.PACK = files;
+  } catch (err) { status('st3', 'Error al crear el paquete: ' + err.message, 'err'); }
+  $('make').disabled = false; draw();
+});
+
+function status(id, t, cls) { const e = $(id); e.textContent = t; e.className = 'status' + (cls ? ' ' + cls : ''); }
+
+// ---------------- sample car (for trying the tool) ----------------
+function sampleCar() {
+  const g = new THREE.Group(), paint = new THREE.MeshStandardMaterial({ name: 'Carpaint', color: 0x8b847d, metalness: 0.6, roughness: 0.3 });
+  const glass = new THREE.MeshStandardMaterial({ name: 'Glass', color: 0x1a1e26, metalness: 0.2, roughness: 0.1 });
+  const tire = new THREE.MeshStandardMaterial({ name: 'Tire', color: 0x111111, roughness: 0.9 });
+  const tail = new THREE.MeshStandardMaterial({ name: 'Tail_light', color: 0x5a0a0a, emissive: 0x000000 });
+  const head = new THREE.MeshStandardMaterial({ name: 'Head_light', color: 0xdddddd, emissive: 0x000000 });
+  const box = (w, h, d, m, x, y, z) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); g.add(o); return o; };
+  box(1.6, 0.7, 3.6, paint, 0, 0.6, 0); box(1.45, 0.55, 2.0, glass, 0, 1.2, -0.2); box(1.4, 0.06, 1.9, paint, 0, 1.5, -0.2);
+  [[-0.72, 1.15], [0.72, 1.15], [-0.72, -1.2], [0.72, -1.2]].forEach(([x, z]) => { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.22, 24), tire); t.rotation.z = Math.PI / 2; t.position.set(x, 0.3, z); g.add(t); });
+  box(0.3, 0.14, 0.04, tail, -0.6, 0.8, -1.81); box(0.3, 0.14, 0.04, tail, 0.6, 0.8, -1.81);
+  box(0.3, 0.12, 0.04, head, -0.6, 0.72, 1.81); box(0.3, 0.12, 0.04, head, 0.6, 0.72, 1.81);
+  return g;
+}
+window.__ready = true;
+</script>
+</body>
+</html>

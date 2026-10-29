@@ -1,13 +1,9 @@
 package com.simple.carlauncher;
 
-import android.Manifest;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.location.Address;
 import android.location.Geocoder;
-import android.location.Location;
-import android.location.LocationManager;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -58,6 +54,15 @@ public class Weather {
         return "—";
     }
 
+    /** For the voice: "Está nublado, con 18 grados." */
+    public String spoken() {
+        String d = description().toLowerCase();
+        String verb = code <= 3 || code == 45 || code == 48 ? "Está " : "Hay ";
+        if (code == 0 && !isDay) { verb = "La noche está "; d = "despejada"; }
+        if (code == 1 || code == 2) verb = "Está ";
+        return verb + d + ", con " + temp + (Math.abs(temp) == 1 ? " grado." : " grados.");
+    }
+
     public int icon() {
         if (code <= 1) return isDay ? R.drawable.ic_w_sun : R.drawable.ic_w_moon;
         if (code <= 3) return R.drawable.ic_w_cloud;
@@ -80,15 +85,19 @@ public class Weather {
     public static void fetch(Context ctx, Listener l) {
         Context c = ctx.getApplicationContext();
         Handler main = new Handler(Looper.getMainLooper());
-        new Thread(() -> {
+        new Thread(new Runnable() { public void run() {
             try {
                 double lat, lon;
                 String city = "";
-                Location loc = lastLocation(c);
-                if (loc != null) {
-                    lat = loc.getLatitude();
-                    lon = loc.getLongitude();
+                double[] pos = PicoPlaca.lastPosition(c);
+                if (pos != null) {
+                    lat = pos[0];
+                    lon = pos[1];
                     city = cityName(c, lat, lon);
+                    if (city == null || city.isEmpty()) {
+                        PicoRules.City known = PicoRules.locate(lat, lon);
+                        city = known == null ? "" : known.name;
+                    }
                 } else {
                     JSONObject ip = new JSONObject(get("https://ipapi.co/json/"));
                     lat = ip.getDouble("latitude");
@@ -115,26 +124,11 @@ public class Weather {
                 j.put("city", city);
                 prefs(c).edit().putString("json", j.toString()).apply();
                 Weather w = new Weather(j);
-                main.post(() -> l.onWeather(w));
+                if (l != null) main.post(new Runnable() { public void run() { l.onWeather(w); } });
             } catch (Exception ignored) {
                 // No internet: keep showing the cached weather.
             }
-        }).start();
-    }
-
-    private static Location lastLocation(Context c) {
-        if (c.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            return null;
-        }
-        LocationManager lm = (LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
-        Location best = null;
-        for (String p : lm.getAllProviders()) {
-            try {
-                Location l = lm.getLastKnownLocation(p);
-                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
-            } catch (SecurityException ignored) { }
-        }
-        return best;
+        }}).start();
     }
 
     private static String cityName(Context c, double lat, double lon) {

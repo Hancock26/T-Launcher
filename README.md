@@ -2,7 +2,7 @@
 
 # T-Launcher
 
-⬇️ **[Descargar T-Launcher.apk](https://github.com/Hancock26/T-Launcher/raw/main/descargas/T-Launcher.apk)** · 🌐 **Página y tutorial:** https://t-launcher.vercel.app · **Generador del carro:** https://t-launcher.vercel.app/generador/
+⬇️ **[Descargar T-Launcher.apk](https://github.com/Hancock26/T-Launcher/releases/latest/download/T-Launcher.apk)** · 🌐 **Página y tutorial:** https://t-launcher.vercel.app · **Generador del carro:** https://t-launcher.vercel.app/generador/
 
 Pantalla de inicio estilo Tesla para radios Android de carro (Android 8 a 14), hecha en Colombia 🇨🇴 por **Jesus Torregroza**.
 
@@ -31,7 +31,7 @@ Pantalla de inicio estilo Tesla para radios Android de carro (Android 8 a 14), h
 
 ### 1. Instalar
 
-1. Descarga **[T-Launcher.apk](https://github.com/Hancock26/T-Launcher/raw/main/descargas/T-Launcher.apk)** (está en la carpeta `descargas/` de este repositorio).
+1. Descarga **[T-Launcher.apk](https://github.com/Hancock26/T-Launcher/releases/latest/download/T-Launcher.apk)** (también en la sección [Releases](../../releases)).
 2. Pásalo al radio con una USB, o descárgalo directo en el radio.
 3. Ábrelo con el explorador de archivos y toca **Instalar**. Si el radio lo pide, permite *instalar apps de origen desconocido*.
 

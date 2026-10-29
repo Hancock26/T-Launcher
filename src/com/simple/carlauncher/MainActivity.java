@@ -145,8 +145,10 @@ public class MainActivity extends Activity implements LocationListener {
                 JSONObject pico = new JSONObject();
                 boolean restricted = ps.state == PicoPlaca.State.RESTRICTED;
                 pico.put("show", restricted);
+                pico.put("label", ps.label);
                 if (restricted) {
-                    pico.put("text", (ps.result.activeNow ? "Pico y placa ahora · " : "Hoy pico y placa · ")
+                    String lb = ps.label.substring(0, 1).toUpperCase() + ps.label.substring(1);
+                    pico.put("text", (ps.result.activeNow ? lb + " ahora · " : "Hoy " + ps.label + " · ")
                             + PicoRules.hoursText(ps.result.today));
                 }
                 j.put("pico", pico);
@@ -265,10 +267,18 @@ public class MainActivity extends Activity implements LocationListener {
                 public void run() {
                     org.json.JSONArray arr = new org.json.JSONArray();
                     try {
-                        android.location.Geocoder gc = new android.location.Geocoder(MainActivity.this, new java.util.Locale("es", "CO"));
+                        android.location.Geocoder gc = new android.location.Geocoder(MainActivity.this, new java.util.Locale("es"));
                         java.util.List<android.location.Address> list = null;
                         if (lat != 0 || lon != 0) list = gc.getFromLocationName(q, 6, lat - 0.35, lon - 0.35, lat + 0.35, lon + 0.35);
-                        if (list == null || list.isEmpty()) list = gc.getFromLocationName(q + ", Colombia", 6);
+                        if (list == null || list.isEmpty()) {
+                            // Retry adding the country where the car is (Colombia, México, Chile…).
+                            String countryName = "";
+                            try {
+                                java.util.List<android.location.Address> here = (lat != 0 || lon != 0) ? gc.getFromLocation(lat, lon, 1) : null;
+                                if (here != null && !here.isEmpty() && here.get(0).getCountryName() != null) countryName = here.get(0).getCountryName();
+                            } catch (Exception ignored) { }
+                            list = gc.getFromLocationName(countryName.isEmpty() ? q : q + ", " + countryName, 6);
+                        }
                         if (list != null) for (android.location.Address ad : list) {
                             if (!ad.hasLatitude()) continue;
                             JSONObject o = new JSONObject();

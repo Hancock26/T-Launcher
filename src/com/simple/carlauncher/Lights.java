@@ -68,6 +68,19 @@ final class Lights {
         if (isOn(c)) return true;
         int ui = c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         if (ui == Configuration.UI_MODE_NIGHT_YES) return true;
+        return nightBySun(c);
+    }
+
+    /** Night from just after sunset to sunrise where the car is (any country); without GPS, 6:01 p. m. – 6:00 a. m. */
+    static boolean nightBySun(Context c) {
+        try {
+            double[] p = PicoPlaca.lastPosition(c);
+            // Colombia keeps the 6:01 p. m. rule the owner chose; elsewhere the real sunset.
+            boolean colombia = p != null && p[0] > -4.3 && p[0] < 13.5 && p[1] > -82 && p[1] < -66.8;
+            if (p != null && !colombia) return Sun.isNight(p[0], p[1], Calendar.getInstance());
+        } catch (Exception ignored) {
+            // fall back to the clock
+        }
         return nightByClock();
     }
 

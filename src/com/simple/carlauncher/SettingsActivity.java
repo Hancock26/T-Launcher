@@ -198,11 +198,14 @@ public class SettingsActivity extends Activity {
         refreshers.add(new Runnable() { public void run() {
             PicoPlaca.Status s = PicoPlaca.today(a);
             ppStatus.setText(s.headline() + (s.city.isEmpty() ? "" : " · " + s.city) + "\n" + s.detail()
+                    + (s.hint != null ? "\n" + s.hint : "")
                     + (s.stale ? "\n⚠ La rotación pudo cambiar: verifica o usa el modo manual" : ""));
         }});
 
         pp.addView(row("Ciudad", new Value() { public String get() { return cityLabel(); } },
                 new Runnable() { public void run() { chooseCity(); } }));
+        pp.addView(row("Tipo de carro (México y Chile)", new Value() { public String get() { return classLabel(); } },
+                new Runnable() { public void run() { chooseClass(); } }));
         TextView daysLabel = note("Mis días de pico y placa (modo manual o ciudades sin datos):");
         daysLabel.setPadding(dp(4), dp(10), dp(4), dp(6));
         pp.addView(daysLabel);
@@ -238,9 +241,11 @@ public class SettingsActivity extends Activity {
                         }
                     });
         }}));
-        pp.addView(note("Reglas incluidas (oct. 2026): Bogotá, Medellín y Valle de Aburrá, Cali, Bucaramanga, "
-                + "Cartagena y Manizales. Las alcaldías cambian la rotación cada trimestre o semestre: si no "
-                + "coincide, usa el modo manual. Sin restricción en festivos."));
+        pp.addView(note("Reglas incluidas (oct. 2026). Colombia: Bogotá, Medellín y Valle de Aburrá, Cali, Bucaramanga, "
+                + "Cartagena y Manizales. México: Hoy No Circula (CDMX y área metropolitana, según tu holograma). "
+                + "Chile: restricción de Santiago (mayo a agosto; marca tus días según el calendario del año y tu sello verde). "
+                + "Ecuador: Quito. Buenos Aires y Lima: sin restricción por placa. Las reglas cambian: si no coinciden, "
+                + "usa el modo manual. Sin restricción en festivos (excepto el Hoy No Circula)."));
         col.addView(pp);
         return col;
     }
@@ -255,6 +260,31 @@ public class SettingsActivity extends Activity {
         }
         PicoRules.City c = PicoPlaca.detectCity(this);
         return "Automática (GPS)" + (c == null ? "" : " · " + c.name);
+    }
+
+    private static final String[] CLASS_VALUES = {"", "h00", "h0", "h1", "h2", "cl_new", "cl_old", "cl_none"};
+    private static final String[] CLASS_LABELS = {"No aplica (Colombia y otros países)", "México: holograma 00", "México: holograma 0",
+            "México: holograma 1", "México: holograma 2", "Chile: sello verde, inscrito desde sep. 2011",
+            "Chile: sello verde, inscrito antes de sep. 2011", "Chile: sin sello verde"};
+
+    private String classLabel() {
+        int i = java.util.Arrays.asList(CLASS_VALUES).indexOf(Prefs.get(this).getString("pp_class", ""));
+        return i <= 0 ? "No aplica" : CLASS_LABELS[i];
+    }
+
+    private void chooseClass() {
+        int checked = Math.max(0, java.util.Arrays.asList(CLASS_VALUES).indexOf(Prefs.get(this).getString("pp_class", "")));
+        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Tipo de carro")
+                .setSingleChoiceItems(CLASS_LABELS, checked, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int which) {
+                        Prefs.put(SettingsActivity.this, "pp_class", CLASS_VALUES[which]);
+                        d.dismiss();
+                        refresh();
+                    }
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 
     private void chooseCity() {
@@ -273,7 +303,7 @@ public class SettingsActivity extends Activity {
         values.add(Prefs.PP_OFF);
         int checked = Math.max(0, values.indexOf(Prefs.ppMode(this)));
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle("Ciudad para el pico y placa")
+                .setTitle("Ciudad para la restricción por placa")
                 .setSingleChoiceItems(labels.toArray(new String[0]), checked, new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int which) {
                         Prefs.put(SettingsActivity.this, "pp_mode", values.get(which));
@@ -365,7 +395,7 @@ public class SettingsActivity extends Activity {
 
         col.addView(section("CRÉDITOS"));
         LinearLayout cred = card();
-        cred.addView(note("T-Launcher v16.0 · creado por Jesus Torregroza (Colombia) · proyecto personal, gratuito y sin fines comerciales. "
+        cred.addView(note("T-Launcher v16.1 · creado por Jesus Torregroza (Colombia) · proyecto personal, gratuito y sin fines comerciales. "
                 + "No es un producto de Tesla, Inc. ni de General Motors / Chevrolet."));
         cred.addView(note("• Basado en CleanLauncher de Jhon Jairo (github.com/jhontandazo008/CleanLauncher), el launcher original para radios Android."));
         cred.addView(note("• Diseño de la interfaz basado en \"Tesla Dashboard UI Component Library\" de Nami (Figma Community, CC BY 4.0)."));
@@ -373,7 +403,7 @@ public class SettingsActivity extends Activity {
         cred.addView(note("• Mapas © colaboradores de OpenStreetMap, servidos por OpenFreeMap · Rutas: OSRM · Búsqueda: Photon y Nominatim · "
                 + "Clima: Open-Meteo · Letra Inter (SIL OFL)."));
         col.addView(cred);
-        TextView version = note("T-Launcher v16.0 · por Jesus Torregroza");
+        TextView version = note("T-Launcher v16.1 · por Jesus Torregroza");
         version.setGravity(Gravity.CENTER);
         version.setPadding(0, dp(16), 0, dp(24));
         col.addView(version);

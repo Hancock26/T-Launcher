@@ -21,6 +21,9 @@ final class PicoPlaca {
         boolean manual;
         int digit = -1;
         PicoRules.Result result;
+        String label = "pico y placa";   // "Hoy No Circula", "restricción vehicular"…
+        String country = "CO";
+        String hint;                     // extra line (vehicle type missing, season…)
 
         /** Short headline for the home card. */
         String headline() {
@@ -33,7 +36,7 @@ final class PicoPlaca {
                 case HOLIDAY: return "Hoy es festivo";
                 case DONE_TODAY: return "Ya terminó por hoy";
                 case FREE: return "Hoy puedes circular";
-                default: return result.activeNow ? "¡Tienes pico y placa ahora!" : "Hoy tienes pico y placa";
+                default: return result.activeNow ? "¡Tienes " + label + " ahora!" : "Hoy tienes " + label;
             }
         }
 
@@ -59,7 +62,7 @@ final class PicoPlaca {
         /** Spoken sentence for the welcome message, or null when there is nothing to say. */
         String spoken() {
             if (state == State.RESTRICTED) {
-                return "Hoy tienes pico y placa " + PicoRules.spokenHours(result.today) + ".";
+                return "Hoy tienes " + label + " " + PicoRules.spokenHours(result.today) + ".";
             }
             return null;
         }
@@ -105,7 +108,23 @@ final class PicoPlaca {
                 }
             } else {
                 s.city = city.name;
+                s.label = city.label;
+                s.country = city.country;
                 rule = city.rule;
+                PicoRules.vclass = Prefs.get(c).getString("pp_class", "");
+                if (rule instanceof PicoRules.HoyNoCircula && PicoRules.vclass.isEmpty())
+                    s.hint = "Elige tu holograma en Ajustes › Tipo de carro";
+                if (rule instanceof PicoRules.SantiagoSeason) {
+                    // Digits change every year: the user's days inside the May–August season.
+                    rule = new PicoRules.SantiagoSeason(manualRule(c));
+                    if (PicoRules.vclass.isEmpty()) s.hint = "Elige tu sello verde en Ajustes › Tipo de carro";
+                    else if (!"cl_new".equals(PicoRules.vclass) && manualRule(c) == null
+                            && PicoRules.SantiagoSeason.inSeason(Calendar.getInstance()))
+                        s.hint = "Marca tus días según el calendario de este año";
+                    else if (!PicoRules.SantiagoSeason.inSeason(Calendar.getInstance()))
+                        s.hint = "Temporada de restricción: 1 de mayo al 31 de agosto";
+                }
+                if (rule == PicoRules.NONE) s.hint = "En " + city.name + " no hay restricción por placa";
                 if (rule == null) rule = manualRule(c);
                 if (rule == null) {
                     s.state = State.NO_DATA;
@@ -121,7 +140,7 @@ final class PicoPlaca {
             return s;
         }
 
-        s.result = PicoRules.evaluate(rule, Math.max(0, s.digit), Calendar.getInstance());
+        s.result = PicoRules.evaluate(rule, Math.max(0, s.digit), Calendar.getInstance(), s.country);
         s.state = s.result.today != null ? State.RESTRICTED
                 : s.result.holiday != null ? State.HOLIDAY : State.FREE;
         if (s.state == State.RESTRICTED && !s.result.activeNow) {

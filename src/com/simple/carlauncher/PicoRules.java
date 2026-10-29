@@ -97,6 +97,63 @@ final class PicoRules {
         }
     }
 
+    /**
+     * Vehicle class chosen in Ajustes, needed where the rule depends on the car and not only on the plate:
+     * México "h00", "h0", "h1", "h2" (holograma); Chile "cl_new" (sello verde desde sep. 2011),
+     * "cl_old" (sello verde antes), "cl_none" (sin sello verde). Empty = not set.
+     */
+    static volatile String vclass = "";
+
+    /**
+     * México, Hoy No Circula (CDMX y municipios conurbados), 5:00–22:00.
+     * Mon 5-6, Tue 7-8, Wed 3-4, Thu 1-2, Fri 9-0 for hologramas 1 and 2. Saturdays: holograma 2 always;
+     * holograma 1 odd plates on the 1st and 3rd Saturday, even plates on the 2nd and 4th. Hologramas 0 / 00 exempt.
+     */
+    static final class HoyNoCircula implements Rule {
+        final int[][] hours = h(5, 0, 22, 0);
+        final WeekdayRule week = new WeekdayRule(hours, d(5, 6), d(7, 8), d(3, 4), d(1, 2), d(9, 0));
+
+        public int[][] ranges(Calendar day, int digit) {
+            String c = vclass;
+            if ("h0".equals(c) || "h00".equals(c)) return null;
+            int dow = day.get(Calendar.DAY_OF_WEEK);
+            if (dow == Calendar.SATURDAY) {
+                if ("h2".equals(c)) return hours;
+                int nth = (day.get(Calendar.DAY_OF_MONTH) - 1) / 7 + 1;
+                boolean odd = digit % 2 == 1;
+                if (nth == 1 || nth == 3) return odd ? hours : null;
+                if (nth == 2 || nth == 4) return odd ? null : hours;
+                return null;
+            }
+            return week.ranges(day, digit);
+        }
+    }
+
+    /**
+     * Chile, restricción vehicular de Santiago: 1 May – 31 Aug, Mon–Fri 7:30–21:00. Cars with sello verde
+     * registered from Sept 2011 are exempt (outside environmental emergencies). The digits change every year,
+     * so the user marks the days of the current calendar in manual mode; this rule only limits it to the season.
+     */
+    static final class SantiagoSeason implements Rule {
+        final Rule inner;
+
+        SantiagoSeason(Rule inner) {
+            this.inner = inner;
+        }
+
+        public int[][] ranges(Calendar day, int digit) {
+            if ("cl_new".equals(vclass)) return null;
+            int m = day.get(Calendar.MONTH) + 1;
+            if (m < 5 || m > 8) return null;
+            return inner == null ? null : inner.ranges(day, digit);
+        }
+
+        static boolean inSeason(Calendar day) {
+            int m = day.get(Calendar.MONTH) + 1;
+            return m >= 5 && m <= 8;
+        }
+    }
+
     /** City without pico y placa for private cars. */
     static final Rule NONE = new Rule() {
         public int[][] ranges(Calendar day, int digit) {
@@ -111,6 +168,8 @@ final class PicoRules {
         final double lat, lon, radiusKm;
         final Rule rule;          // null = no data for this city
         final Calendar validUntil; // null = no known expiry
+        String country = "CO";     // holidays of this country
+        String label = "pico y placa";
 
         City(String id, String name, double lat, double lon, double radiusKm, Rule rule, Calendar validUntil) {
             this.id = id;
@@ -120,6 +179,12 @@ final class PicoRules {
             this.radiusKm = radiusKm;
             this.rule = rule;
             this.validUntil = validUntil;
+        }
+
+        City in(String country, String label) {
+            this.country = country;
+            this.label = label;
+            return this;
         }
     }
 
@@ -153,6 +218,21 @@ final class PicoRules {
 
         // Manizales: no pico y placa for private cars (2026).
         CITIES.add(new City("manizales", "Manizales", 5.0703, -75.5138, 10, NONE, date(2026, 12, 31)));
+
+        // ---- Other countries (checked Oct 2026) ----
+        // México: Hoy No Circula, CDMX and the metropolitan area.
+        CITIES.add(new City("cdmx", "Ciudad de México", 19.4326, -99.1332, 40, new HoyNoCircula(), date(2027, 6, 30))
+                .in("MX", "Hoy No Circula"));
+        // Chile: Santiago, May–August; the digits are announced every year (manual days).
+        CITIES.add(new City("santiago", "Santiago de Chile", -33.4489, -70.6693, 28, new SantiagoSeason(null), null)
+                .in("CL", "restricción vehicular"));
+        // Ecuador: Quito, Mon–Fri 6:00–9:30 and 16:00–20:00.
+        CITIES.add(new City("quito", "Quito", -0.1807, -78.4678, 20,
+                new WeekdayRule(new int[][]{{6 * 60, 9 * 60 + 30}, {16 * 60, 20 * 60}}, d(1, 2), d(3, 4), d(5, 6), d(7, 8), d(9, 0)),
+                date(2027, 6, 30)).in("EC", "pico y placa"));
+        // Argentina: Buenos Aires has no plate restriction for private cars.
+        CITIES.add(new City("buenosaires", "Buenos Aires", -34.6037, -58.3816, 35, NONE, null).in("AR", "restricción"));
+        CITIES.add(new City("lima", "Lima", -12.0464, -77.0428, 30, NONE, null).in("PE", "restricción"));
 
         // Cities recognised by GPS but without verified data: the user sets them up manually.
         unknown("soacha", "Soacha", 4.5794, -74.2168, 5);
@@ -214,9 +294,13 @@ final class PicoRules {
     }
 
     static Result evaluate(Rule rule, int digit, Calendar now) {
+        return evaluate(rule, digit, now, "CO");
+    }
+
+    static Result evaluate(Rule rule, int digit, Calendar now, String country) {
         Result r = new Result();
         Calendar day = startOfDay(now);
-        r.holiday = holidayName(day);
+        r.holiday = holidayName(day, country);
         r.today = r.holiday == null ? rule.ranges(day, digit) : null;
         if (r.today != null) {
             int min = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
@@ -225,7 +309,7 @@ final class PicoRules {
         for (int i = 1; i <= 21; i++) {
             Calendar d = (Calendar) day.clone();
             d.add(Calendar.DAY_OF_MONTH, i);
-            if (holidayName(d) != null) continue;
+            if (holidayName(d, country) != null) continue;
             int[][] rg = rule.ranges(d, digit);
             if (rg != null) {
                 r.next = d;
@@ -310,10 +394,64 @@ final class PicoRules {
     // ---------- Colombian holidays (Ley 51 de 1983 "Ley Emiliani") ----------
 
     static String holidayName(Calendar day) {
+        return holidayName(day, "CO");
+    }
+
+    /** Holiday of that country (no restriction that day), or null. México: Hoy No Circula also applies on holidays. */
+    static String holidayName(Calendar day, String country) {
         int y = day.get(Calendar.YEAR);
         long n = dayNumber(day);
-        for (Object[] h : holidays(y)) if (dayNumber((Calendar) h[0]) == n) return (String) h[1];
+        List<Object[]> list = "CO".equals(country) ? holidays(y) : "CL".equals(country) ? holidaysCL(y)
+                : "EC".equals(country) ? holidaysEC(y) : null;
+        if (list == null) return null;
+        for (Object[] h : list) if (dayNumber((Calendar) h[0]) == n) return (String) h[1];
         return null;
+    }
+
+    /** Chile (restriction season May–August matters most). */
+    static List<Object[]> holidaysCL(int y) {
+        List<Object[]> l = new ArrayList<>();
+        add(l, date(y, 1, 1), "Año Nuevo");
+        Calendar easter = easter(y);
+        add(l, plus(easter, -2), "Viernes Santo");
+        add(l, plus(easter, -1), "Sábado Santo");
+        add(l, date(y, 5, 1), "Día del Trabajo");
+        add(l, date(y, 5, 21), "Glorias Navales");
+        add(l, date(y, 6, 21), "Pueblos Indígenas");
+        add(l, nearestMonday(date(y, 6, 29)), "San Pedro y San Pablo");
+        add(l, date(y, 7, 16), "Virgen del Carmen");
+        add(l, date(y, 8, 15), "Asunción de la Virgen");
+        add(l, date(y, 9, 18), "Fiestas Patrias");
+        add(l, date(y, 9, 19), "Glorias del Ejército");
+        add(l, date(y, 11, 1), "Todos los Santos");
+        add(l, date(y, 12, 8), "Inmaculada Concepción");
+        add(l, date(y, 12, 25), "Navidad");
+        return l;
+    }
+
+    /** Ecuador (fixed dates; the government sometimes moves some of them). */
+    static List<Object[]> holidaysEC(int y) {
+        List<Object[]> l = new ArrayList<>();
+        Calendar easter = easter(y);
+        add(l, date(y, 1, 1), "Año Nuevo");
+        add(l, plus(easter, -48), "Carnaval");
+        add(l, plus(easter, -47), "Carnaval");
+        add(l, plus(easter, -2), "Viernes Santo");
+        add(l, date(y, 5, 1), "Día del Trabajo");
+        add(l, date(y, 5, 24), "Batalla de Pichincha");
+        add(l, date(y, 8, 10), "Primer Grito de Independencia");
+        add(l, date(y, 10, 9), "Independencia de Guayaquil");
+        add(l, date(y, 11, 2), "Día de los Difuntos");
+        add(l, date(y, 11, 3), "Independencia de Cuenca");
+        add(l, date(y, 12, 25), "Navidad");
+        return l;
+    }
+
+    private static Calendar nearestMonday(Calendar c) {
+        int dow = c.get(Calendar.DAY_OF_WEEK);
+        if (dow == Calendar.TUESDAY || dow == Calendar.WEDNESDAY) return plus(c, -(dow - Calendar.MONDAY));
+        if (dow == Calendar.THURSDAY || dow == Calendar.FRIDAY) return plus(c, 9 - dow);
+        return c;
     }
 
     private static int cachedYear = -1;

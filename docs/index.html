@@ -48,7 +48,7 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 <body>
 <div class="band"><div class="in">
   <div class="brand"><img src="icon.png" alt=""><h1>T-Launcher</h1></div>
-  <p>Pantalla de inicio estilo Tesla para el radio Android de tu carro: navegación con vista de conducción, pico y placa, música y tu carro en 3D. Gratis. Creado por <strong>Jesus Torregroza</strong>.</p>
+  <p>Pantalla de inicio estilo Tesla para el radio Android de tu carro: navegación con vista de conducción, pico y placa, música y tu carro en 3D. Gratis. Hecho en Colombia por <strong>Jesus Torregroza</strong>; sirve en toda Latinoamérica.</p>
   <img class="shot" src="captura-conduccion-noche.png" alt="Vista de conducción de T-Launcher con la ruta y el mapa">
   <div class="cta"><a class="main" href="https://github.com/Hancock26/T-Launcher/releases/latest/download/T-Launcher.apk">Descargar el APK</a><a href="generador/">Poner mi carro en 3D</a></div>
 </div></div>
@@ -63,12 +63,20 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     </ol>
   </section>
   <section>
-    <h2><span>2</span>Primer uso</h2>
+    <h2><span>2</span>Configura tus datos</h2>
+    <p class="note">La primera vez se abre <strong>Ajustes</strong> (luego lo abres con el ícono del carro, abajo a la izquierda). Los números de la imagen son los pasos:</p>
+    <img class="shot" src="ajustes-ilustracion.png" alt="Ilustración de la pantalla Ajustes con los campos numerados" loading="lazy">
     <ol>
-      <li>Escribe tu <strong>nombre</strong> y tu <strong>placa</strong>.</li>
-      <li>Permite la <strong>ubicación</strong> (GPS, clima y navegación).</li>
-      <li>Activa <strong>Ver la música</strong>. Si Android no deja: Ajustes › Apps › T-Launcher › ⋮ › <em>Permitir ajustes restringidos</em>.</li>
+      <li><strong>Tu nombre:</strong> para el saludo al encender el carro.</li>
+      <li><strong>Placa:</strong> para el pico y placa (o la restricción de tu ciudad).</li>
+      <li><strong>Kilometraje y aceite:</strong> escribe el kilometraje que marca el tablero y el del último cambio de aceite. El GPS va sumando lo que recorres y te avisa cuando falten 500 km para el próximo cambio (cada 5.000 km, se puede cambiar).</li>
+      <li><strong>Ciudad:</strong> déjala en <em>Automática (GPS)</em>. En México y Chile elige también el <strong>Tipo de carro</strong> (holograma o sello verde).</li>
+      <li><strong>Música:</strong> la app que abre el botón de música (Spotify, YouTube Music, la radio USB…).</li>
+      <li><strong>Mapas / navegación:</strong> la app para “Abrir en Waze”: Waze, Google Maps u otra. Ahí también guardas Casa y Trabajo.</li>
+      <li><strong>Ubicación:</strong> permítela (GPS, clima, rutas y velocidad).</li>
+      <li><strong>Ver la música que suena:</strong> actívalo para ver la canción y leer las indicaciones de Waze. Si Android no deja: Ajustes del radio › Apps › T-Launcher › ⋮ › <em>Permitir ajustes restringidos</em>.</li>
     </ol>
+    <p class="note">Tip: en la barra de abajo, mantén presionado un botón (música, mapas, teléfono…) para cambiar su app. Imagen ilustrativa: en tu radio los colores pueden variar.</p>
   </section>
   <section>
     <h2><span>3</span>Navegar</h2>
@@ -93,9 +101,20 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     <p class="note">Respeta la licencia del modelo y nombra a su autor.</p>
   </section>
   <section>
+    <h2>En tu país</h2>
+    <ul>
+      <li><strong>Colombia:</strong> pico y placa de Bogotá, Medellín y Valle de Aburrá, Cali, Bucaramanga, Cartagena y Manizales. Búsqueda de direcciones tipo <em>Calle 72 # 46-30</em>.</li>
+      <li><strong>México:</strong> Hoy No Circula de CDMX y el área metropolitana, según tu holograma (00, 0, 1 o 2), incluidos los sábados.</li>
+      <li><strong>Chile:</strong> restricción de Santiago de mayo a agosto, según tu sello verde. Como los dígitos cambian cada año, marcas tus días en Ajustes.</li>
+      <li><strong>Ecuador:</strong> pico y placa de Quito (6:00–9:30 y 16:00–20:00).</li>
+      <li><strong>Argentina, Perú y otros:</strong> sin restricción por placa en Buenos Aires y Lima; en otras ciudades puedes usar el modo manual.</li>
+      <li><strong>En todos:</strong> mapas, rutas, calles en 3D, velocidad y búsqueda funcionan igual. Fuera de Colombia el tema de noche se activa con la puesta del sol de tu ciudad.</li>
+    </ul>
+  </section>
+  <section>
     <h2>Qué es real y qué es simulado</h2>
     <div class="two">
-      <div><span class="tag ok">Funciona</span><ul><li>Navegación, voz y aviso de fotomultas</li><li>Calles reales en la vista de conducción</li><li>Pico y placa por GPS</li><li>Velocidad, límite, música, clima</li></ul></div>
+      <div><span class="tag ok">Funciona</span><ul><li>Navegación, voz y aviso de fotomultas</li><li>Calles reales en la vista de conducción</li><li>Pico y placa / restricción por GPS</li><li>Velocidad, límite, música, clima</li></ul></div>
       <div><span class="tag sim">Simulado</span><ul><li>Cambios P-R-N-D</li><li>Seguro, capó, baúl y temperatura</li><li>Carros alrededor</li><li>No es piloto automático</li></ul></div>
     </div>
   </section>

@@ -1010,7 +1010,7 @@ function poseFix(s, sp) {
   if (sp >= 4 && typeof s.bearing === 'number') pose.fh = s.bearing;
   if (!pose.ok) { pose.ok = true; pose.e = pose.te = q[0]; pose.n = pose.tn = q[1]; pose.h = pose.th = pose.fh; }
   if (Date.now() - world.at > 2500) loadRoads();
-  loadPois(); checkCams();
+  loadPois(); checkCams(); detectCountry();
 }
 // Nearest point on a polyline (local metres): segment end index i, projected point, distance, metres from the start
 function segNearest(pts, e, n) {
@@ -1361,9 +1361,19 @@ function androidGeo(q) {
     setTimeout(function () { if (geoCb[id]) { delete geoCb[id]; res([]); } }, 7000);
   });
 }
+// Country where the car is (from the GPS), so searches stay in that country: Colombia, México, Chile…
+var country = store.get('cc', '');
+function detectCountry() {
+  var p = myPos(); if (!p || detectCountry.busy || (country && detectCountry.at && Date.now() - detectCountry.at < 3600000)) return;
+  detectCountry.busy = true; detectCountry.at = Date.now();
+  fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=3&accept-language=es&lat=' + p[0] + '&lon=' + p[1])
+    .then(function (r) { return r.json(); })
+    .then(function (j) { var cc = j && j.address && j.address.country_code; if (cc) { country = cc; store.set('cc', cc); } })
+    .catch(function () {}).then(function () { detectCountry.busy = false; });
+}
 function nominatim(q) {
   var p = myPos(), vb = p ? '&viewbox=' + (p[1] - 0.3) + ',' + (p[0] + 0.3) + ',' + (p[1] + 0.3) + ',' + (p[0] - 0.3) : '';
-  return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=co&accept-language=es&q=' + encodeURIComponent(q) + vb)
+  return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6' + (country ? '&countrycodes=' + country : '') + '&accept-language=es&q=' + encodeURIComponent(q) + vb)
     .then(function (r) { return r.json(); })
     .then(function (j) { return j.map(function (x) { var parts = (x.display_name || '').split(', ');
       return { name: x.name || parts[0], sub: parts.slice(1, 4).join(', '), lat: +x.lat, lon: +x.lon, src: 'osm' }; }); })
@@ -1384,7 +1394,7 @@ function parseCol(q) {
   return { type: t, n1: m[2], l1: m[3] || '', n2: m[5], l2: m[6] || '', cross: cross, label: t + ' ' + m[2] + (m[3] || '').toUpperCase() + ' # ' + m[5] + (m[6] || '').toUpperCase() + '-' + m[7] };
 }
 function colAddr(q) {
-  var a = parseCol(q), p = myPos();
+  var a = (!country || country === 'co') ? parseCol(q) : null, p = myPos(); // Colombian street numbering only
   if (!a || !p) return Promise.resolve([]);
   function rx(types, n, l) { return '^(Avenida )?(' + types + ') ' + n + (l ? ' ?' + l : '') + '( ?Bis)?( [A-Z].*)?$'; }
   var Q = '[out:json][timeout:20];(way(around:25000,' + p[0] + ',' + p[1] + ')[highway][name~"' + rx(a.type, a.n1, a.l1) + '",i];)->.a;' +
@@ -1784,6 +1794,7 @@ function render(s) {
   $('oilWarn').textContent = s.oil.left < 0 ? '¡Cambio de aceite!' : 'Aceite: ' + fmtKm(s.oil.left) + ' km';
   var pico = s.pico && s.pico.show;
   $('pico1').hidden = !pico; $('pico2').hidden = !pico;
+  if (pico && s.pico.label && s.pico.label !== 'pico y placa') { $('pico1').textContent = s.pico.label.toUpperCase(); $('pico2').textContent = s.pico.label; }
   if (pico) $('pico2').textContent = s.pico.text || 'Pico y placa hoy';
 
   var m = s.media || {};

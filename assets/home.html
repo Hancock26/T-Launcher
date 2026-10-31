@@ -452,7 +452,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
           <button type="button" id="micBtn" aria-label="Decir a dónde ir"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg></button>
           <button type="button" id="toHome" aria-label="Agrandar o reducir el mapa"><svg viewBox="0 0 24 24"><path id="expPath" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg></button>
         </div>
-        <div class="mapattr" id="mapAttr" hidden>© OpenStreetMap · © CARTO</div>
+        <div class="mapattr" id="mapAttr" hidden>© Esri · © OpenStreetMap</div>
         <div class="card mapmsg" id="mapMsg" hidden>El mapa no carga. Revisa la conexión a internet.</div>
         <div class="applaunch" id="appLaunch" hidden>
           <button class="go" id="appGo" type="button"><svg viewBox="0 0 24 24"><path d="M12 2 4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg><span id="appGoText">Abrir mapas</span></button>
@@ -639,7 +639,7 @@ function refreshCarMark() {
 function styleUrl(n) { return 'https://tiles.openfreemap.org/styles/' + (n ? 'positron' : 'liberty'); }
 var mlStyleNight = null;
 function setMapTheme(n) {
-  if (map && tiles && !sat) { var u = baseTiles(); if (tiles._url !== u) tiles.setUrl(u); }
+  if (map && tiles && !sat) { var u = baseTiles(); syncLabels(); if (tiles._url !== u) tiles.setUrl(u); }
   if (!ml || !mlReady || mlStyleNight === n) return;
   mlStyleNight = n; ml.setStyle(styleUrl(n));
 }
@@ -652,7 +652,7 @@ function ensureMap() {
     mlStyleNight = document.documentElement.dataset.theme === 'dark';
     ml = new maplibregl.Map({ container: 'map', style: styleUrl(mlStyleNight),
       center: [-74.0817, 4.6097], zoom: 15, attributionControl: { compact: true }, maxPitch: 60 });
-    var timer = setTimeout(function () { if (!mlReady) leafletMap(); }, 12000);
+    var timer = setTimeout(function () { if (!mlReady) leafletMap(); }, 20000);
     ml.on('load', function () { mlReady = true; clearTimeout(timer); $('mapMsg').hidden = true; if (sat) applySat(); if (nav.route) drawRoute(); });
     ml.on('error', function () { if (!mlReady) { clearTimeout(timer); leafletMap(); } });
     ml.on('style.load', function () { if (!mlReady) return; if (sat) applySat(); if (nav.route) drawRoute(); world.at = 0; });
@@ -672,16 +672,28 @@ function leafletMap() {
   if (sat) setTimeout(applySat, 0);
   marker = L.marker([4.6097, -74.0817], { icon: L.divIcon({ className: '', html: '<div id="arrow">' + carMarkHtml() + '</div>', iconSize: [44, 48], iconAnchor: [22, 24] }), interactive: false });
   var loaded = 0;
-  // CARTO "Voyager" by day (clean, coloured roads, like Waze / Google) and "Dark Matter" by night.
-  tiles = L.tileLayer(baseTiles(), { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', keepBuffer: 4 });
+  // Esri (no key needed): "World Street Map" by day (coloured roads, like Google) and "Dark Gray" + labels by night.
+  // (CARTO was dropped: since 2026 it stamps "API KEY REQUIRED" on its tiles.)
+  tiles = L.tileLayer(baseTiles(), { maxZoom: 20, maxNativeZoom: 19, keepBuffer: 4 });
   tiles.on('tileload', function () { loaded++; $('mapMsg').hidden = true; });
   tiles.on('tileerror', function () { if (!loaded) $('mapMsg').hidden = false; });
   tiles.addTo(map);
+  labels = L.tileLayer(ESRI + 'Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 16, keepBuffer: 4 });
+  syncLabels();
+}
+var labels = null;
+var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+function darkMap() { return document.documentElement.dataset.theme === 'dark'; }
+function syncLabels() {
+  if (!map || !labels) return;
+  var want = !sat && darkMap();
+  if (want && !map.hasLayer(labels)) labels.addTo(map); else if (!want && map.hasLayer(labels)) map.removeLayer(labels);
+  if (tiles) tiles.options.maxNativeZoom = !sat && darkMap() ? 16 : 19;
 }
 var SAT_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 function baseTiles() {
   if (sat) return SAT_TILES;
-  return 'https://{s}.basemaps.cartocdn.com/rastertiles/' + (document.documentElement.dataset.theme === 'dark' ? 'dark_all' : 'voyager') + '/{z}/{x}/{y}.png';
+  return darkMap() ? ESRI + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}' : ESRI + 'World_Street_Map/MapServer/tile/{z}/{y}/{x}';
 }
 // Heading-up for the Leaflet map (it can't rotate by itself): the whole map layer is turned and tilted with CSS,
 // so the way you drive always points up and the road ahead is seen in perspective, like in MapLibre / Tesla.
@@ -1746,7 +1758,7 @@ function applySat() {
       ml.addLayer({ id: 'sat', type: 'raster', source: 'sat' }, first || undefined);
     } else if (!sat && ml.getLayer('sat')) ml.removeLayer('sat');
   } else if (map && tiles) {
-    tiles.setUrl(baseTiles());
+    syncLabels(); tiles.setUrl(baseTiles());
     if (sat) headUp(false);
   }
 }

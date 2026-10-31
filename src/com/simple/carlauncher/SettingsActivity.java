@@ -395,7 +395,7 @@ public class SettingsActivity extends Activity {
 
         col.addView(section("CRÉDITOS"));
         LinearLayout cred = card();
-        cred.addView(note("T-Launcher v16.4 · creado por Jesus Torregroza (Colombia) · proyecto personal, gratuito y sin fines comerciales. "
+        cred.addView(note("T-Launcher v16.5 · creado por Jesus Torregroza (Colombia) · proyecto personal, gratuito y sin fines comerciales. "
                 + "No es un producto de Tesla, Inc. ni de General Motors / Chevrolet."));
         cred.addView(note("• Basado en CleanLauncher de Jhon Jairo (github.com/jhontandazo008/CleanLauncher), el launcher original para radios Android."));
         cred.addView(note("• Diseño de la interfaz basado en \"Tesla Dashboard UI Component Library\" de Nami (Figma Community, CC BY 4.0)."));
@@ -410,7 +410,7 @@ public class SettingsActivity extends Activity {
         }}, new Runnable() { public void run() { Updater.check(a, true); } }));
         upd.addView(note("La app revisa sola cada día si hay una versión nueva y te avisa con el carro detenido."));
         col.addView(upd);
-        TextView version = note("T-Launcher v16.4 · por Jesus Torregroza");
+        TextView version = note("T-Launcher v16.5 · por Jesus Torregroza");
         version.setGravity(Gravity.CENTER);
         version.setPadding(0, dp(16), 0, dp(24));
         col.addView(version);
